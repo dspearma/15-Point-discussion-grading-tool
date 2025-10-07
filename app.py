@@ -737,6 +737,14 @@ if csv_file and docx_file:
                     csv_io = io.StringIO(csv_content.decode('utf-8'))
                     rows = list(csv.DictReader(csv_io))
                     
+                    # Show CSV preview
+                    st.subheader("CSV Preview")
+                    if rows:
+                        st.write(f"Found {len(rows)} rows with columns: {list(rows[0].keys())}")
+                        st.dataframe(pd.DataFrame(rows).head(3))
+                    else:
+                        st.error("No data found in CSV file or file is empty")
+                    
                     progress_bar.progress(50)
                     st.text(f"Processing {len(rows)} submissions...")
                     
@@ -746,13 +754,37 @@ if csv_file and docx_file:
                     
                     # Process each submission
                     for idx, row in enumerate(rows):
-                        submission_text = row.get("Initial Posts", "").strip()
+                        # Debug: Print column names for first row
+                        if idx == 0:
+                            st.write(f"CSV columns found: {list(row.keys())}")
+                        
+                        # Try multiple possible column names for the submission text
+                        submission_text = ""
+                        for col_name in ["Initial Posts", "Initial Post", "Post", "Submission", "Response", "Answer"]:
+                            if col_name in row and row.get(col_name, "").strip():
+                                submission_text = row.get(col_name, "").strip()
+                                break
+                        
+                        # Debug: Show what we found for the first few rows
+                        if idx < 3:
+                            if submission_text:
+                                st.write(f"Row {idx+1}: Found submission text: {submission_text[:50]}...")
+                            else:
+                                st.write(f"Row {idx+1}: No submission text found")
+                        
                         if not submission_text:
                             continue
                         
-                        username = row.get("Username", "")
+                        # Get username with fallback
+                        username = ""
+                        for col_name in ["Username", "Name", "Student", "Student Name", "User"]:
+                            if col_name in row and row.get(col_name, "").strip():
+                                username = row.get(col_name, "").strip()
+                                break
+                        
                         student_first_name = username.split()[0] if username else f"Student {idx+1}"
                         
+                        # Get replies
                         reply_columns = [col for col in row.keys() if col.startswith('Reply')]
                         replies = [row[col].strip() for col in reply_columns if row.get(col, '').strip()]
                         
@@ -770,7 +802,7 @@ if csv_file and docx_file:
                                 student_first_name, 
                                 video_text, 
                                 replies,
-                                api_key  # Pass the API key
+                                api_key  # Pass API key
                             )
                             
                             # Create result dictionary
@@ -782,6 +814,7 @@ if csv_file and docx_file:
                             
                         except Exception as e:
                             failed_submissions.append((username, str(e)))
+                            st.error(f"Error grading {username}: {e}")
                     
                     progress_bar.progress(90)
                     st.text("Finalizing results...")
