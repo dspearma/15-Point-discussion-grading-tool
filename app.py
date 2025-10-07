@@ -317,7 +317,8 @@ def construct_final_feedback(
     local_scores: Dict[str, float],
     local_feedback: Dict[str, str],
     improvement_areas: List[str],
-    student_first_name: str
+    student_first_name: str,
+    grading_scale: str
 ) -> str:
     prompt_feedback = llm_results.get('prompt_feedback', 'Feedback missing for prompt quality.')
     key_terms_feedback = llm_results.get('key_terms_feedback', local_feedback.get('key_terms_fallback', 'Feedback missing for key terms.'))
@@ -339,10 +340,27 @@ def construct_final_feedback(
     video_feedback = transform_to_second_person(video_feedback)
     general_feedback_llm = transform_to_second_person(general_feedback_llm)
 
-    prompt_key_combined_feedback = f"{prompt_feedback.strip()} {key_terms_feedback.strip()}"
-    prompt_key_formatted = f"PROMPT AND KEY TERMS [{local_scores['prompt_key_score']:.1f}/5.0]: {prompt_key_combined_feedback}."
-    video_formatted = f"REFERENCE TO VIDEO [{local_scores['video_score']:.1f}/5.0]: {video_feedback}."
-    reading_formatted = f"REFERENCE TO READING [{local_scores['reading_score']:.1f}/5.0]: {reading_feedback}."
+    # Format scores based on grading scale
+    if grading_scale == "15-point (3 categories)":
+        prompt_key_score = local_scores['prompt_key_score']
+        reading_score = local_scores['reading_score']
+        video_score = local_scores['video_score']
+        total_points = 15.0
+        
+        prompt_key_formatted = f"PROMPT AND KEY TERMS [{prompt_key_score:.1f}/5.0]: {prompt_feedback.strip()} {key_terms_feedback.strip()}."
+        video_formatted = f"REFERENCE TO VIDEO [{video_score:.1f}/5.0]: {video_feedback}."
+        reading_formatted = f"REFERENCE TO READING [{reading_score:.1f}/5.0]: {reading_feedback}."
+    else:  # 16-point (4 categories)
+        prompt_score = local_scores['prompt_score']
+        key_terms_score = local_scores['key_terms_score']
+        reading_score = local_scores['reading_score']
+        video_score = local_scores['video_score']
+        total_points = 16.0
+        
+        prompt_formatted = f"PROMPT ADHERENCE [{prompt_score:.1f}/4.0]: {prompt_feedback.strip()}."
+        key_terms_formatted = f"KEY TERMS USAGE [{key_terms_score:.1f}/4.0]: {key_terms_feedback.strip()}."
+        video_formatted = f"REFERENCE TO VIDEO [{video_score:.1f}/4.0]: {video_feedback}."
+        reading_formatted = f"REFERENCE TO READING [{reading_score:.1f}/4.0]: {reading_feedback}."
 
     if improvement_areas:
         improvement_focus = f"{student_first_name}, while your work demonstrates strong engagement with the content, focus on improving in the area(s) of: {', '.join(improvement_areas)} to maximize your synthesis of the concepts. {general_feedback_llm}"
@@ -351,12 +369,22 @@ def construct_final_feedback(
 
     general_formatted = f"GENERAL FEEDBACK: {improvement_focus}"
 
-    final_feedback = '\n'.join([
-        prompt_key_formatted,
-        video_formatted,
-        reading_formatted,
-        general_formatted
-    ])
+    # Construct final feedback based on grading scale
+    if grading_scale == "15-point (3 categories)":
+        final_feedback = '\n'.join([
+            prompt_key_formatted,
+            video_formatted,
+            reading_formatted,
+            general_formatted
+        ])
+    else:  # 16-point (4 categories)
+        final_feedback = '\n'.join([
+            prompt_formatted,
+            key_terms_formatted,
+            video_formatted,
+            reading_formatted,
+            general_formatted
+        ])
 
     final_feedback = re.sub(r'\s{2,}', ' ', final_feedback).strip()
     return final_feedback
@@ -375,7 +403,8 @@ def grade_submission_with_retries(
     student_first_name: str,
     video_text: str,
     replies: List[str],
-    api_key: str
+    api_key: str,
+    grading_scale: str
 ) -> Dict[str, str]:
     """Grade submission with comprehensive local and API scoring."""
 
@@ -462,8 +491,14 @@ def grade_submission_with_retries(
     # ----------------------------------------------------
     # D. Analyze citation presence based on updated rules
 
-    highest_max_reading_score = 2.5 # Default Minimum Score
-    best_citation_status_msg = f"NO CLEAR REFERENCE TO THE ASSIGNED READING WAS DETECTED. The minimum score of **2.5** applies."
+    # Set reading score based on grading scale
+    if grading_scale == "15-point (3 categories)":
+        highest_max_reading_score = 2.5 # Default Minimum Score
+        best_citation_status_msg = f"NO CLEAR REFERENCE TO THE ASSIGNED READING WAS DETECTED. The minimum score of **2.5** applies."
+    else:  # 16-point (4 categories)
+        highest_max_reading_score = 2.0 # Default Minimum Score
+        best_citation_status_msg = f"NO CLEAR REFERENCE TO THE ASSIGNED READING WAS DETECTED. The minimum score of **2.0** applies."
+
     detected_author = ""
 
     # Only proceed with citation checking if we have an author
@@ -489,16 +524,27 @@ def grade_submission_with_retries(
         print(f"DEBUG: Citation detection - Author present: {bool(author_present)}, Page present: {page_present}")
         print(f"DEBUG: Detected pages: {detected_pages}")
 
-        # Determine score based on author and page presence
-        if author_present and page_present:
-            highest_max_reading_score = 5.0
-            best_citation_status_msg = f"Both the author ('{assigned_author}') and a relevant page number from the assigned reading were detected. Full credit awarded."
-        elif author_present:
-            highest_max_reading_score = 4.0
-            best_citation_status_msg = f"The author ('{assigned_author}') was mentioned, but no specific page number from the assigned reading was detected. Partial credit awarded."
-        elif page_present:
-            highest_max_reading_score = 4.5
-            best_citation_status_msg = f"A page number from the assigned reading was detected, but the author ('{assigned_author}') was not mentioned. Partial credit awarded."
+        # Determine score based on author and page presence and grading scale
+        if grading_scale == "15-point (3 categories)":
+            if author_present and page_present:
+                highest_max_reading_score = 5.0
+                best_citation_status_msg = f"Both the author ('{assigned_author}') and a relevant page number from the assigned reading were detected. Full credit awarded."
+            elif author_present:
+                highest_max_reading_score = 4.0
+                best_citation_status_msg = f"The author ('{assigned_author}') was mentioned, but no specific page number from the assigned reading was detected. Partial credit awarded."
+            elif page_present:
+                highest_max_reading_score = 4.5
+                best_citation_status_msg = f"A page number from the assigned reading was detected, but the author ('{assigned_author}') was not mentioned. Partial credit awarded."
+        else:  # 16-point (4 categories)
+            if author_present and page_present:
+                highest_max_reading_score = 4.0
+                best_citation_status_msg = f"Both the author ('{assigned_author}') and a relevant page number from the assigned reading were detected. Full credit awarded."
+            elif author_present:
+                highest_max_reading_score = 3.0
+                best_citation_status_msg = f"The author ('{assigned_author}') was mentioned, but no specific page number from the assigned reading was detected. Partial credit awarded."
+            elif page_present:
+                highest_max_reading_score = 3.5
+                best_citation_status_msg = f"A page number from the assigned reading was detected, but the author ('{assigned_author}') was not mentioned. Partial credit awarded."
 
         # Check for incorrect author if the correct one wasn't found
         if not author_present:
@@ -512,54 +558,81 @@ def grade_submission_with_retries(
                 # Check if this could be an author citation
                 if len(potential_author) > 3:  # Only consider names longer than 3 characters
                     detected_author = potential_author
-                    if page_present:
-                        highest_max_reading_score = 4.5
-                        best_citation_status_msg = f"A reference to '{potential_author}' with page number {', '.join(detected_pages)} was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded for the correct page reference."
-                    else:
-                        highest_max_reading_score = 3.0
-                        best_citation_status_msg = f"A reference to '{potential_author}' was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded."
+                    if grading_scale == "15-point (3 categories)":
+                        if page_present:
+                            highest_max_reading_score = 4.5
+                            best_citation_status_msg = f"A reference to '{potential_author}' with page number {', '.join(detected_pages)} was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded for the correct page reference."
+                        else:
+                            highest_max_reading_score = 3.0
+                            best_citation_status_msg = f"A reference to '{potential_author}' was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded."
+                    else:  # 16-point (4 categories)
+                        if page_present:
+                            highest_max_reading_score = 3.5
+                            best_citation_status_msg = f"A reference to '{potential_author}' with page number {', '.join(detected_pages)} was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded for the correct page reference."
+                        else:
+                            highest_max_reading_score = 2.5
+                            best_citation_status_msg = f"A reference to '{potential_author}' was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded."
                     break
     else:
         # No author found in reading text, so we can't check citations
-        highest_max_reading_score = 2.5
-        best_citation_status_msg = f"The assigned reading information did not specify an author. The minimum score of **2.5** applies."
+        if grading_scale == "15-point (3 categories)":
+            highest_max_reading_score = 2.5
+            best_citation_status_msg = f"The assigned reading information did not specify an author. The minimum score of **2.5** applies."
+        else:  # 16-point (4 categories)
+            highest_max_reading_score = 2.0
+            best_citation_status_msg = f"The assigned reading information did not specify an author. The minimum score of **2.0** applies."
 
     max_reading_score = highest_max_reading_score
     citation_status_msg = best_citation_status_msg
 
     # --- GENERATE READING FEEDBACK BASED ON SCORE ---
-    if max_reading_score == 5.0:
-        reading_feedback_local = f"You successfully integrated concepts from the reading and provided a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}), earning full credit for this section."
-    elif max_reading_score == 4.5:
-        if detected_author:
-            reading_feedback_local = f"You referenced page number(s) {', '.join(detected_pages)} from the assigned reading, but cited '{detected_author}' instead of the correct author '{assigned_author}'. Partial credit awarded for the correct page reference. Ensure you reference the correct author to earn full credit."
-        else:
-            reading_feedback_local = f"A page number from the assigned reading was detected, but the author was not mentioned. Include both the author and page number for full credit."
-    elif max_reading_score == 4.0:
-        reading_feedback_local = f"You mentioned the author ({assigned_author}), demonstrating engagement with the reading. However, you did not provide a specific page number from the assigned reading ({reading_info['page_range_expected']}) as required for higher credit. Include specific page references to earn full credit."
-    elif max_reading_score == 3.0:
-        reading_feedback_local = f"You referenced '{detected_author}' in your submission, but this does not match the assigned author '{assigned_author}'. Ensure you reference the correct author and include a page number to earn more credit."
-    else:  # 2.5
-        if assigned_author:
-            reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}) as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score."
-        else:
-            reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score."
+    if grading_scale == "15-point (3 categories)":
+        if max_reading_score == 5.0:
+            reading_feedback_local = f"You successfully integrated concepts from the reading and provided a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}), earning full credit for this section."
+        elif max_reading_score == 4.5:
+            if detected_author:
+                reading_feedback_local = f"You referenced page number(s) {', '.join(detected_pages)} from the assigned reading, but cited '{detected_author}' instead of the correct author '{assigned_author}'. Partial credit awarded for the correct page reference. Ensure you reference the correct author to earn full credit."
+            else:
+                reading_feedback_local = f"A page number from the assigned reading was detected, but the author was not mentioned. Include both the author and page number for full credit."
+        elif max_reading_score == 4.0:
+            reading_feedback_local = f"You mentioned the author ({assigned_author}), demonstrating engagement with the reading. However, you did not provide a specific page number from the assigned reading ({reading_info['page_range_expected']}) as required for higher credit. Include specific page references to earn full credit."
+        elif max_reading_score == 3.0:
+            reading_feedback_local = f"You referenced '{detected_author}' in your submission, but this does not match the assigned author '{assigned_author}'. Ensure you reference the correct author and include a page number to earn more credit."
+        else:  # 2.5
+            if assigned_author:
+                reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}) as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score."
+            else:
+                reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score."
+    else:  # 16-point (4 categories)
+        if max_reading_score == 4.0:
+            reading_feedback_local = f"You successfully integrated concepts from the reading and provided a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}), earning full credit for this section."
+        elif max_reading_score == 3.5:
+            if detected_author:
+                reading_feedback_local = f"You referenced page number(s) {', '.join(detected_pages)} from the assigned reading, but cited '{detected_author}' instead of the correct author '{assigned_author}'. Partial credit awarded for the correct page reference. Ensure you reference the correct author to earn full credit."
+            else:
+                reading_feedback_local = f"A page number from the assigned reading was detected, but the author was not mentioned. Include both the author and page number for full credit."
+        elif max_reading_score == 3.0:
+            reading_feedback_local = f"You mentioned the author ({assigned_author}), demonstrating engagement with the reading. However, you did not provide a specific page number from the assigned reading ({reading_info['page_range_expected']}) as required for higher credit. Include specific page references to earn full credit."
+        elif max_reading_score == 2.5:
+            reading_feedback_local = f"You referenced '{detected_author}' in your submission, but this does not match the assigned author '{assigned_author}'. Ensure you reference the correct author and include a page number to earn more credit."
+        else:  # 2.0
+            if assigned_author:
+                reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}) as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score."
+            else:
+                reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score."
 
     # ----------------------------------------------------
 
     # Local scores - reading score is SET here, not by LLM
-    local_scores = {
-        'prompt_key_score': 0.0,
-        'reading_score': max_reading_score,  # DIRECTLY SET FROM PYTHON DETECTION (5-point scale)
-        'video_score': 0.0
-    }
-    local_feedback = {
-        'reading_feedback': reading_feedback_local,  # PYTHON-GENERATED FEEDBACK
-        'key_terms_fallback': f"LLM failed to provide key terms feedback. Detected terms: {detected_terms_str}"
-    }
-
-    # LLM scoring criteria - reading section is informational only
-    llm_scoring_criteria = f"""
+    if grading_scale == "15-point (3 categories)":
+        local_scores = {
+            'prompt_key_score': 0.0,
+            'reading_score': max_reading_score,  # DIRECTLY SET FROM PYTHON DETECTION (5-point scale)
+            'video_score': 0.0
+        }
+        
+        # LLM scoring criteria - reading section is informational only
+        llm_scoring_criteria = f"""
 SCORING Guidelines for LLM (10 points total - Reading is scored separately):
 1. PROMPT ADHERENCE AND KEY TERMS (Minimum 1.5 - 5.0): How well does the student address the prompt AND use key terms? (5.0 Maximum)
     - Prompt adherence: Does the submission fully answer all parts of the discussion question?
@@ -575,7 +648,7 @@ SCORING Guidelines for LLM (10 points total - Reading is scored separately):
     - **A specific timestamp is NOT required for a 5.0 score.**
 """
 
-    prompt_for_llm = f"""Grade this student discussion submission based ONLY on the following criteria. Reading Reference ({max_reading_score:.1f}) is scored separately by the system.
+        prompt_for_llm = f"""Grade this student discussion submission based ONLY on the following criteria. Reading Reference ({max_reading_score:.1f}) is scored separately by the system.
 
 STUDENT: {student_first_name}
 
@@ -604,6 +677,67 @@ SUBMISSION TEXT:
 {submission_text[:1500]}
 """
 
+    else:  # 16-point (4 categories)
+        local_scores = {
+            'prompt_score': 0.0,
+            'key_terms_score': 0.0,
+            'reading_score': max_reading_score,  # DIRECTLY SET FROM PYTHON DETECTION (4-point scale)
+            'video_score': 0.0
+        }
+        
+        # LLM scoring criteria - reading section is informational only
+        llm_scoring_criteria = f"""
+SCORING Guidelines for LLM (12 points total - Reading is scored separately):
+1. PROMPT ADHERENCE (Minimum 1.0 - 4.0): How well does the student address the prompt? (4.0 Maximum)
+    - Prompt adherence: Does the submission fully answer all parts of the discussion question?
+
+2. KEY TERMS USAGE (Minimum 1.0 - 4.0): How well does the student use key terms? (4.0 Maximum)
+    - Key terms usage: Did the student use at least one key term meaningfully?
+    - Detected Key Terms to review: "{detected_terms_str}"
+
+3. READING REFERENCE: **This section is scored separately by the system as {max_reading_score:.1f}. Do not provide a reading_score in your response.**
+    - Citation Status (for context): {citation_status_msg}
+
+4. VIDEO REFERENCE (Minimum 2.0 - 4.0): How specific and relevant is the use of the assigned video material?
+    - Full credit (4.0) requires clear use of concepts demonstrated by specific examples or accurate summaries.
+    - **A specific timestamp is NOT required for a 4.0 score.**
+"""
+
+        prompt_for_llm = f"""Grade this student discussion submission based ONLY on the following criteria. Reading Reference ({max_reading_score:.1f}) is scored separately by the system.
+
+STUDENT: {student_first_name}
+
+ASSIGNMENT CONTEXT:
+Prompt: {discussion_prompt[:300]}...
+Reading: {reading_text[:200]}...
+Video: {video_text[:200]}...
+
+{llm_scoring_criteria}
+
+IMPORTANT: Provide SPECIFIC and ENCOURAGING feedback in the second person ("You", "Your").
+**DO NOT include "reading_score" in your JSON response - it is handled separately.**
+
+Respond with ONLY valid JSON. Omit any markdown fences (```json). Use floating point numbers rounded to the nearest 0.5.
+
+{{
+    "prompt_score": "4.0",
+    "key_terms_score": "4.0",
+    "video_score": "4.0",
+    "prompt_feedback": "You successfully articulated how involuntary servitude was preserved and connected this theme to present-day issues.",
+    "key_terms_feedback": "Your contextual usage of key terms earns full credit, demonstrating clear understanding of the material.",
+    "video_feedback": "You clearly referenced the video context regarding convict leasing and the continuation of forced labor, demonstrating a strong grasp of the material.",
+    "general_feedback": "Your arguments were well-structured and demonstrated impressive critical thinking."
+}}
+
+SUBMISSION TEXT:
+{submission_text[:1500]}
+"""
+
+    local_feedback = {
+        'reading_feedback': reading_feedback_local,  # PYTHON-GENERATED FEEDBACK
+        'key_terms_fallback': f"LLM failed to provide key terms feedback. Detected terms: {detected_terms_str}"
+    }
+
     api_url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -618,7 +752,7 @@ SUBMISSION TEXT:
         "max_tokens_for_reasoning": 512
     }
 
-    print("📞 Calling API for Prompt/Key Terms and Video grading...")
+    print("📞 Calling API for grading...")
     grade_response = robust_api_call(api_url, headers, payload, timeout=60, max_retries=3, api_key=api_key)
 
     llm_results = robust_json_parsing(grade_response, max_retries=2)
@@ -626,36 +760,64 @@ SUBMISSION TEXT:
 
     # 3. Final Score Compilation
     try:
-        local_scores['prompt_key_score'] = round_nearest_half(max(1.5, min(5.0, float(llm_results.get("prompt_key_score", 1.5)))))
-        local_scores['video_score'] = round_nearest_half(max(2.5, min(5.0, float(llm_results.get("video_score", 2.5)))))
+        if grading_scale == "15-point (3 categories)":
+            local_scores['prompt_key_score'] = round_nearest_half(max(1.5, min(5.0, float(llm_results.get("prompt_key_score", 1.5)))))
+            local_scores['video_score'] = round_nearest_half(max(2.5, min(5.0, float(llm_results.get("video_score", 2.5)))))
+        else:  # 16-point (4 categories)
+            local_scores['prompt_score'] = round_nearest_half(max(1.0, min(4.0, float(llm_results.get("prompt_score", 1.0)))))
+            local_scores['key_terms_score'] = round_nearest_half(max(1.0, min(4.0, float(llm_results.get("key_terms_score", 1.0)))))
+            local_scores['video_score'] = round_nearest_half(max(2.0, min(4.0, float(llm_results.get("video_score", 2.0)))))
         # reading_score already set from Python detection
 
     except (ValueError, TypeError):
         print("⚠️ LLM returned invalid score data. Assigning minimums.")
-        local_scores['prompt_key_score'] = 1.5
-        local_scores['video_score'] = 2.5
+        if grading_scale == "15-point (3 categories)":
+            local_scores['prompt_key_score'] = 1.5
+            local_scores['video_score'] = 2.5
+        else:  # 16-point (4 categories)
+            local_scores['prompt_score'] = 1.0
+            local_scores['key_terms_score'] = 1.0
+            local_scores['video_score'] = 2.0
         # reading_score remains as set from Python detection
 
     # Identify lowest scoring component for General Feedback
-    weighted_scores = {
-        "Prompt Adherence and Key Terms": local_scores['prompt_key_score'] / 5.0,
-        "Reading Reference": local_scores['reading_score'] / 5.0,
-        "Video Reference": local_scores['video_score'] / 5.0
-    }
+    if grading_scale == "15-point (3 categories)":
+        weighted_scores = {
+            "Prompt Adherence and Key Terms": local_scores['prompt_key_score'] / 5.0,
+            "Reading Reference": local_scores['reading_score'] / 5.0,
+            "Video Reference": local_scores['video_score'] / 5.0
+        }
+    else:  # 16-point (4 categories)
+        weighted_scores = {
+            "Prompt Adherence": local_scores['prompt_score'] / 4.0,
+            "Key Terms Usage": local_scores['key_terms_score'] / 4.0,
+            "Reading Reference": local_scores['reading_score'] / 4.0,
+            "Video Reference": local_scores['video_score'] / 4.0
+        }
+    
     sorted_improvement = sorted(weighted_scores.items(), key=lambda item: item[1])
     improvement_areas = [name for name, score in sorted_improvement if score < 1.0 and score > 0.0]
 
     total = sum(local_scores.values())
     total_score = round_nearest_half(total)
 
-    final_grades = {
-        "prompt_key_score": str(local_scores['prompt_key_score']),
-        "video_score": str(local_scores['video_score']),
-        "reading_score": str(local_scores['reading_score']),
-        "total_score": str(total_score),
-    }
+    if grading_scale == "15-point (3 categories)":
+        final_grades = {
+            "prompt_key_score": str(local_scores['prompt_key_score']),
+            "video_score": str(local_scores['video_score']),
+            "reading_score": str(local_scores['reading_score']),
+            "total_score": str(total_score),
+        }
+    else:  # 16-point (4 categories)
+        final_grades = {
+            "prompt_score": str(local_scores['prompt_score']),
+            "key_terms_score": str(local_scores['key_terms_score']),
+            "video_score": str(local_scores['video_score']),
+            "reading_score": str(local_scores['reading_score']),
+            "total_score": str(total_score),
+        }
 
-    final_grades["feedback"] = construct_final_feedback(llm_results, local_scores, local_feedback, improvement_areas, student_first_name)
+    final_grades["feedback"] = construct_final_feedback(llm_results, local_scores, local_feedback, improvement_areas, student_first_name, grading_scale)
 
     return final_grades
 
@@ -685,6 +847,13 @@ st.markdown("""
         border-radius: 0.5rem;
         margin-bottom: 1rem;
     }
+    .scale-info {
+        background-color: #e8f4f8;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        border-left: 5px solid #1f77b4;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -696,6 +865,40 @@ st.markdown("Upload your CSV and DOCX files to grade student discussions.")
 st.sidebar.header("Configuration")
 api_key = st.sidebar.text_input("OpenRouter API Key", type="password")
 st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)")
+
+# Add grading scale selector
+grading_scale = st.sidebar.selectbox(
+    "Select Grading Scale",
+    ["15-point (3 categories)", "16-point (4 categories)"],
+    index=0,
+    help="Choose between the 15-point scale (3 categories) or the 16-point scale (4 categories)"
+)
+
+# Display information about the selected grading scale
+if grading_scale == "15-point (3 categories)":
+    st.sidebar.markdown("""
+    <div class="scale-info">
+    <h4>15-Point Scale (3 Categories)</h4>
+    <ul>
+        <li>Prompt Adherence & Key Terms (5.0 points)</li>
+        <li>Reading Reference (5.0 points)</li>
+        <li>Video Reference (5.0 points)</li>
+    </ul>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.sidebar.markdown("""
+    <div class="scale-info">
+    <h4>16-Point Scale (4 Categories)</h4>
+    <ul>
+        <li>Prompt Adherence (4.0 points)</li>
+        <li>Key Terms Usage (4.0 points)</li>
+        <li>Reading Reference (4.0 points)</li>
+        <li>Video Reference (4.0 points)</li>
+    </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
 st.sidebar.markdown("---")
 
 # Main content area
@@ -793,7 +996,7 @@ if csv_file and docx_file:
                             progress = 0.5 + (idx / len(rows)) * 0.4
                             progress_bar.progress(progress)
                             
-                            # Call your grading function
+                            # Call your grading function with the selected grading scale
                             grades = grade_submission_with_retries(
                                 strip_tags(submission_text), 
                                 reading_text, 
@@ -802,7 +1005,8 @@ if csv_file and docx_file:
                                 student_first_name, 
                                 video_text, 
                                 replies,
-                                api_key  # Pass API key
+                                api_key,
+                                grading_scale  # Pass the selected grading scale
                             )
                             
                             # Create result dictionary
@@ -837,17 +1041,28 @@ if csv_file and docx_file:
                         
                         # Summary statistics
                         col1, col2, col3 = st.columns(3)
+                        
+                        # Adjust score thresholds based on grading scale
+                        if grading_scale == "15-point (3 categories)":
+                            max_score = 15.0
+                            high_threshold = 12.0
+                            low_threshold = 8.0
+                        else:  # 16-point (4 categories)
+                            max_score = 16.0
+                            high_threshold = 13.0
+                            low_threshold = 9.0
+                        
                         with col1:
                             avg_score = df['total_score'].astype(float).mean()
-                            st.metric("Average Score", f"{avg_score:.2f}/15.0")
+                            st.metric("Average Score", f"{avg_score:.2f}/{max_score}")
                         
                         with col2:
-                            high_scorers = len(df[df['total_score'].astype(float) >= 12.0])
-                            st.metric("High Scorers (≥12)", high_scorers)
+                            high_scorers = len(df[df['total_score'].astype(float) >= high_threshold])
+                            st.metric(f"High Scorers (≥{high_threshold})", high_scorers)
                         
                         with col3:
-                            low_scorers = len(df[df['total_score'].astype(float) < 8.0])
-                            st.metric("Low Scorers (<8)", low_scorers)
+                            low_scorers = len(df[df['total_score'].astype(float) < low_threshold])
+                            st.metric(f"Low Scorers (<{low_threshold})", low_scorers)
                         
                         # Tabs for different views
                         tab1, tab2, tab3 = st.tabs(["📊 Data View", "📈 Score Distribution", "📝 Sample Feedback"])
