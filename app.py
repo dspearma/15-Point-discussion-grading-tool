@@ -12,206 +12,10 @@ import math
 from typing import Dict, Any, List, Union
 from difflib import SequenceMatcher
 
-# Set up the Streamlit page
-st.set_page_config(
-    page_title="Discussion Grading Tool",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# ============================================
+# ALL FUNCTION DEFINITIONS GO HERE
+# ============================================
 
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1f77b4;
-        text-align: center;
-    }
-    .info-box {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin-bottom: 1rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Header
-st.markdown('<h1 class="main-header">📚 Automated Discussion Grading Tool</h1>', unsafe_allow_html=True)
-st.markdown("Upload your CSV and DOCX files to grade student discussions.")
-
-# Sidebar for configuration
-st.sidebar.header("Configuration")
-api_key = st.sidebar.text_input("OpenRouter API Key", type="password")
-st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)")
-st.sidebar.markdown("---")
-
-# Main content area
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown('<div class="info-box"><h3>Step 1: Upload Files</h3></div>', unsafe_allow_html=True)
-    csv_file = st.file_uploader("Upload CSV file with student submissions", type=['csv'])
-    st.markdown("The CSV should contain columns for student names, initial posts, and replies.")
-
-with col2:
-    st.markdown('<div class="info-box"><h3>Step 2: Upload Lesson Plan</h3></div>', unsafe_allow_html=True)
-    docx_file = st.file_uploader("Upload DOCX lesson plan", type=['docx'])
-    st.markdown("The lesson plan should contain discussion prompts, reading assignments, and key terms.")
-
-# Process files when both are uploaded
-if csv_file and docx_file:
-    if st.button("🚀 Process Files", type="primary"):
-        if not api_key:
-            st.error("Please enter your OpenRouter API key in the sidebar.")
-        else:
-            with st.spinner("Processing files... This may take a few minutes."):
-                try:
-                    # Read files
-                    csv_content = csv_file.read()
-                    docx_content = docx_file.read()
-                    
-                    # Add a progress bar
-                    progress_bar = st.progress(0)
-                    st.text("Parsing lesson plan...")
-                    
-                    # Call your existing functions
-                    discussion_prompt, reading_text, video_text, key_terms, objective, key_concepts = parse_lesson_plan_comprehensive(docx_content)
-                    
-                    progress_bar.progress(25)
-                    st.text("Reading CSV file...")
-                    
-                    # Process CSV
-                    csv_io = io.StringIO(csv_content.decode('utf-8'))
-                    rows = list(csv.DictReader(csv_io))
-                    
-                    progress_bar.progress(50)
-                    st.text(f"Processing {len(rows)} submissions...")
-                    
-                    # Initialize results list
-                    results = []
-                    failed_submissions = []
-                    
-                    # Process each submission
-                    for idx, row in enumerate(rows):
-                        submission_text = row.get("Initial Posts", "").strip()
-                        if not submission_text:
-                            continue
-                        
-                        username = row.get("Username", "")
-                        student_first_name = username.split()[0] if username else f"Student {idx+1}"
-                        
-                        reply_columns = [col for col in row.keys() if col.startswith('Reply')]
-                        replies = [row[col].strip() for col in reply_columns if row.get(col, '').strip()]
-                        
-                        try:
-                            # Update progress
-                            progress = 50 + (idx / len(rows)) * 40
-                            progress_bar.progress(progress)
-                            
-                            # Call your grading function
-                            grades = grade_submission_with_retries(
-                                strip_tags(submission_text), 
-                                reading_text, 
-                                key_terms, 
-                                discussion_prompt, 
-                                student_first_name, 
-                                video_text, 
-                                replies,
-                                api_key  # Pass the API key
-                            )
-                            
-                            # Create result dictionary
-                            graded_result = row.copy()
-                            graded_result.update(grades)
-                            graded_result['num_replies_analyzed'] = str(len(replies))
-                            
-                            results.append(graded_result)
-                            
-                        except Exception as e:
-                            failed_submissions.append((username, str(e)))
-                    
-                    progress_bar.progress(90)
-                    st.text("Finalizing results...")
-                    
-                    # Create DataFrame for display
-                    if results:
-                        df = pd.DataFrame(results)
-                        
-                        # Show success message
-                        st.success(f"Grading complete! Successfully graded {len(results)} submissions.")
-                        
-                        if failed_submissions:
-                            st.warning(f"Failed to grade {len(failed_submissions)} submissions.")
-                            with st.expander("View Failed Submissions"):
-                                for username, error in failed_submissions:
-                                    st.write(f"**{username}**: {error}")
-                        
-                        # Display results
-                        st.subheader("Grading Results")
-                        
-                        # Summary statistics
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            avg_score = df['total_score'].astype(float).mean()
-                            st.metric("Average Score", f"{avg_score:.2f}/15.0")
-                        
-                        with col2:
-                            high_scorers = len(df[df['total_score'].astype(float) >= 12.0])
-                            st.metric("High Scorers (≥12)", high_scorers)
-                        
-                        with col3:
-                            low_scorers = len(df[df['total_score'].astype(float) < 8.0])
-                            st.metric("Low Scorers (<8)", low_scorers)
-                        
-                        # Tabs for different views
-                        tab1, tab2, tab3 = st.tabs(["📊 Data View", "📈 Score Distribution", "📝 Sample Feedback"])
-                        
-                        with tab1:
-                            # Display the data
-                            st.dataframe(df)
-                        
-                        with tab2:
-                            # Score distribution chart
-                            import plotly.express as px
-                            fig = px.histogram(
-                                df, 
-                                x="total_score", 
-                                nbins=10,
-                                title="Score Distribution",
-                                labels={"total_score": "Total Score", "count": "Number of Students"}
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                        
-                        with tab3:
-                            # Show a few examples of feedback
-                            st.subheader("Sample Feedback")
-                            sample_size = min(3, len(df))
-                            for i in range(sample_size):
-                                with st.expander(f"Feedback for {df.iloc[i]['Username']}"):
-                                    st.write(df.iloc[i]['feedback'])
-                        
-                        # Download button
-                        csv_output = df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download Graded CSV",
-                            data=csv_output,
-                            file_name="graded_discussions.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.error("No submissions were successfully graded.")
-                    
-                    progress_bar.progress(100)
-                    
-                except Exception as e:
-                    st.error(f"Error processing files: {e}")
-                    st.exception(e)
-else:
-    st.info("Please upload both files to begin grading.")
-
-# Include all your existing functions below
 def strip_tags(text: str) -> str:
     """Removes HTML tags from a string."""
     pattern = re.compile(r'<[^>]*>')
@@ -854,3 +658,206 @@ SUBMISSION TEXT:
     final_grades["feedback"] = construct_final_feedback(llm_results, local_scores, local_feedback, improvement_areas, student_first_name)
 
     return final_grades
+
+# ============================================
+# STREAMLIT UI CODE GOES HERE
+# ============================================
+
+# Set up the Streamlit page
+st.set_page_config(
+    page_title="Discussion Grading Tool",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1f77b4;
+        text-align: center;
+    }
+    .info-box {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Header
+st.markdown('<h1 class="main-header">📚 Automated Discussion Grading Tool</h1>', unsafe_allow_html=True)
+st.markdown("Upload your CSV and DOCX files to grade student discussions.")
+
+# Sidebar for configuration
+st.sidebar.header("Configuration")
+api_key = st.sidebar.text_input("OpenRouter API Key", type="password")
+st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)")
+st.sidebar.markdown("---")
+
+# Main content area
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown('<div class="info-box"><h3>Step 1: Upload Files</h3></div>', unsafe_allow_html=True)
+    csv_file = st.file_uploader("Upload CSV file with student submissions", type=['csv'])
+    st.markdown("The CSV should contain columns for student names, initial posts, and replies.")
+
+with col2:
+    st.markdown('<div class="info-box"><h3>Step 2: Upload Lesson Plan</h3></div>', unsafe_allow_html=True)
+    docx_file = st.file_uploader("Upload DOCX lesson plan", type=['docx'])
+    st.markdown("The lesson plan should contain discussion prompts, reading assignments, and key terms.")
+
+# Process files when both are uploaded
+if csv_file and docx_file:
+    if st.button("🚀 Process Files", type="primary"):
+        if not api_key:
+            st.error("Please enter your OpenRouter API key in the sidebar.")
+        else:
+            with st.spinner("Processing files... This may take a few minutes."):
+                try:
+                    # Read files
+                    csv_content = csv_file.read()
+                    docx_content = docx_file.read()
+                    
+                    # Add a progress bar
+                    progress_bar = st.progress(0)
+                    st.text("Parsing lesson plan...")
+                    
+                    # Call your existing functions
+                    discussion_prompt, reading_text, video_text, key_terms, objective, key_concepts = parse_lesson_plan_comprehensive(docx_content)
+                    
+                    progress_bar.progress(25)
+                    st.text("Reading CSV file...")
+                    
+                    # Process CSV
+                    csv_io = io.StringIO(csv_content.decode('utf-8'))
+                    rows = list(csv.DictReader(csv_io))
+                    
+                    progress_bar.progress(50)
+                    st.text(f"Processing {len(rows)} submissions...")
+                    
+                    # Initialize results list
+                    results = []
+                    failed_submissions = []
+                    
+                    # Process each submission
+                    for idx, row in enumerate(rows):
+                        submission_text = row.get("Initial Posts", "").strip()
+                        if not submission_text:
+                            continue
+                        
+                        username = row.get("Username", "")
+                        student_first_name = username.split()[0] if username else f"Student {idx+1}"
+                        
+                        reply_columns = [col for col in row.keys() if col.startswith('Reply')]
+                        replies = [row[col].strip() for col in reply_columns if row.get(col, '').strip()]
+                        
+                        try:
+                            # Update progress
+                            progress = 50 + (idx / len(rows)) * 40
+                            progress_bar.progress(progress)
+                            
+                            # Call your grading function
+                            grades = grade_submission_with_retries(
+                                strip_tags(submission_text), 
+                                reading_text, 
+                                key_terms, 
+                                discussion_prompt, 
+                                student_first_name, 
+                                video_text, 
+                                replies,
+                                api_key  # Pass the API key
+                            )
+                            
+                            # Create result dictionary
+                            graded_result = row.copy()
+                            graded_result.update(grades)
+                            graded_result['num_replies_analyzed'] = str(len(replies))
+                            
+                            results.append(graded_result)
+                            
+                        except Exception as e:
+                            failed_submissions.append((username, str(e)))
+                    
+                    progress_bar.progress(90)
+                    st.text("Finalizing results...")
+                    
+                    # Create DataFrame for display
+                    if results:
+                        df = pd.DataFrame(results)
+                        
+                        # Show success message
+                        st.success(f"Grading complete! Successfully graded {len(results)} submissions.")
+                        
+                        if failed_submissions:
+                            st.warning(f"Failed to grade {len(failed_submissions)} submissions.")
+                            with st.expander("View Failed Submissions"):
+                                for username, error in failed_submissions:
+                                    st.write(f"**{username}**: {error}")
+                        
+                        # Display results
+                        st.subheader("Grading Results")
+                        
+                        # Summary statistics
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            avg_score = df['total_score'].astype(float).mean()
+                            st.metric("Average Score", f"{avg_score:.2f}/15.0")
+                        
+                        with col2:
+                            high_scorers = len(df[df['total_score'].astype(float) >= 12.0])
+                            st.metric("High Scorers (≥12)", high_scorers)
+                        
+                        with col3:
+                            low_scorers = len(df[df['total_score'].astype(float) < 8.0])
+                            st.metric("Low Scorers (<8)", low_scorers)
+                        
+                        # Tabs for different views
+                        tab1, tab2, tab3 = st.tabs(["📊 Data View", "📈 Score Distribution", "📝 Sample Feedback"])
+                        
+                        with tab1:
+                            # Display the data
+                            st.dataframe(df)
+                        
+                        with tab2:
+                            # Score distribution chart
+                            import plotly.express as px
+                            fig = px.histogram(
+                                df, 
+                                x="total_score", 
+                                nbins=10,
+                                title="Score Distribution",
+                                labels={"total_score": "Total Score", "count": "Number of Students"}
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        with tab3:
+                            # Show a few examples of feedback
+                            st.subheader("Sample Feedback")
+                            sample_size = min(3, len(df))
+                            for i in range(sample_size):
+                                with st.expander(f"Feedback for {df.iloc[i]['Username']}"):
+                                    st.write(df.iloc[i]['feedback'])
+                        
+                        # Download button
+                        csv_output = df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download Graded CSV",
+                            data=csv_output,
+                            file_name="graded_discussions.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.error("No submissions were successfully graded.")
+                    
+                    progress_bar.progress(100)
+                    
+                except Exception as e:
+                    st.error(f"Error processing files: {e}")
+                    st.exception(e)
+else:
+    st.info("Please upload both files to begin grading.")
