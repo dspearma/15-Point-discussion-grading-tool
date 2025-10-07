@@ -730,7 +730,7 @@ if csv_file and docx_file:
                     # Call your existing functions
                     discussion_prompt, reading_text, video_text, key_terms, objective, key_concepts = parse_lesson_plan_comprehensive(docx_content)
                     
-                    progress_bar.progress(25)
+                    progress_bar.progress(0.25)
                     st.text("Reading CSV file...")
                     
                     # Process CSV
@@ -745,7 +745,7 @@ if csv_file and docx_file:
                     else:
                         st.error("No data found in CSV file or file is empty")
                     
-                    progress_bar.progress(50)
+                    progress_bar.progress(0.5)
                     st.text(f"Processing {len(rows)} submissions...")
                     
                     # Initialize results list
@@ -789,8 +789,8 @@ if csv_file and docx_file:
                         replies = [row[col].strip() for col in reply_columns if row.get(col, '').strip()]
                         
                         try:
-                            # Update progress
-                            progress = 50 + (idx / len(rows)) * 40
+                            # Update progress - FIXED: Now using decimal values (0.0-1.0)
+                            progress = 0.5 + (idx / len(rows)) * 0.4
                             progress_bar.progress(progress)
                             
                             # Call your grading function
@@ -816,7 +816,7 @@ if csv_file and docx_file:
                             failed_submissions.append((username, str(e)))
                             st.error(f"Error grading {username}: {e}")
                     
-                    progress_bar.progress(90)
+                    progress_bar.progress(0.9)
                     st.text("Finalizing results...")
                     
                     # Create DataFrame for display
@@ -887,7 +887,7 @@ if csv_file and docx_file:
                     else:
                         st.error("No submissions were successfully graded.")
                     
-                    progress_bar.progress(100)
+                    progress_bar.progress(1.0)
                     
                 except Exception as e:
                     st.error(f"Error processing files: {e}")
