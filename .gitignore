@@ -1,0 +1,10 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Other common files to ignore
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
