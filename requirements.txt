@@ -1,0 +1,6 @@
+streamlit
+python-docx
+python-Levenshtein
+requests
+pandas
+plotly
