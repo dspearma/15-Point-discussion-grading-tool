@@ -386,7 +386,7 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
             'because', 'however', 'although', 'critical', 'analysis', 'blueprint',
             'therefore', 'moreover', 'furthermore', 'in contrast', 'similarly',
             'for example', 'for instance', 'this suggests', 'this demonstrates',
-            'evidence shows', 'research indicates', 'as shown by', 'considering that', 'but'
+            'evidence shows', 'research indicates', 'as shown by', 'considering that'
         ]
 
         # Check for engagement indicators
@@ -657,22 +657,34 @@ def grade_submission_with_retries(
         page_present = False
         detected_pages = []
         if page_numbers:
-            for page in page_numbers:
-                # Convert to string for searching (fix the float conversion issue)
-                page_str = str(int(page)) if isinstance(page, float) and page.is_integer() else str(page)
-                
-                # Look for the page number in various formats
-                patterns = [
-                    r'\b' + re.escape(page_str) + r'\b',  # Just the number: 81
-                    r'\bp\.?\s*' + re.escape(page_str) + r'\b',  # p.81 or p 81
-                    r'\bpage\s*' + re.escape(page_str) + r'\b',  # page 81
-                    r'\bpages?\s*' + re.escape(page_str) + r'\b'  # page 81 or pages 81
-                ]
-                
-                for pattern in patterns:
-                    if re.search(pattern, submission_text, re.IGNORECASE):
+            # If the assigned reading is a range, check for numbers within it
+            if len(page_numbers) == 2:
+                start_page = int(min(page_numbers))
+                end_page = int(max(page_numbers))
+                # Find all numbers in the submission that look like page citations
+                cited_pages = re.findall(r'(?:p|pg|page)s?\.?\s*(\d+)', submission_text, re.IGNORECASE)
+                for page_str in cited_pages:
+                    cited_num = int(page_str)
+                    if start_page <= cited_num <= end_page:
                         page_present = True
                         detected_pages.append(page_str)
+            # Otherwise, check for specific pages listed
+            else:
+                for page in page_numbers:
+                    page_str = str(int(page)) if isinstance(page, float) and page.is_integer() else str(page)
+                    patterns = [
+                        r'\b' + re.escape(page_str) + r'\b',
+                        r'\bp\.?\s*' + re.escape(page_str) + r'\b',
+                        r'\bpage\s*' + re.escape(page_str) + r'\b',
+                        r'\bpages?\s*' + re.escape(page_str) + r'\b'
+                    ]
+                    for pattern in patterns:
+                        if re.search(pattern, submission_text, re.IGNORECASE):
+                            page_present = True
+                            detected_pages.append(page_str)
+                            break # Found this page, move to the next assigned page
+                    if page_present and len(page_numbers) > 1:
+                        # For multiple specific pages, finding one is enough.
                         break
 
         # Determine score based on author and page presence
