@@ -490,11 +490,13 @@ def construct_final_feedback(
     # Format scores based on grading scale
     if grading_scale == "15-point (3 categories)":
         # Scale up the scores for 15-point scale (5 points per category)
-        scaled_prompt_key_score = combined_prompt_key_score * 1.25  # Scale from 4.0 to 5.0
+        # For 15-point scale, prompt and key terms are 2.5 points each
+        scaled_prompt_score = local_scores['prompt_score'] * 1.25  # Scale from 2.0 to 2.5
+        scaled_key_terms_score = local_scores['key_terms_score'] * 1.25  # Scale from 2.0 to 2.5
         scaled_video_score = local_scores['video_score'] * 1.25  # Scale from 4.0 to 5.0
         scaled_reading_score = local_scores['reading_score'] * 1.25  # Scale from 4.0 to 5.0
         
-        prompt_key_formatted = f"PROMPT AND KEY TERMS [{scaled_prompt_key_score:.1f}/5.0]: {prompt_key_combined_feedback}."
+        prompt_key_formatted = f"PROMPT AND KEY TERMS [{scaled_prompt_score + scaled_key_terms_score:.1f}/5.0]: {prompt_key_combined_feedback}."
         video_formatted = f"REFERENCE TO VIDEO [{scaled_video_score:.1f}]: {video_feedback}."
         reading_formatted = f"REFERENCE TO READING [{scaled_reading_score:.1f}]: {reading_feedback}."
     else:  # 16-point (4 categories)
@@ -504,7 +506,14 @@ def construct_final_feedback(
         engagement_formatted = f"DISCUSSION ENGAGEMENT [{local_scores['engagement_score']:.1f}]: {engagement_feedback}."
 
     if improvement_areas:
-        improvement_focus = f"{student_first_name}, while your work demonstrates strong engagement with the content, focus on improving in the area(s) of: {', '.join(improvement_areas)} to maximize your synthesis of the concepts. {general_feedback_llm}"
+        # Remove "Discussion Engagement" from improvement areas for 15-point scale
+        if grading_scale == "15-point (3 categories)" and "Discussion Engagement" in improvement_areas:
+            improvement_areas = [area for area in improvement_areas if area != "Discussion Engagement"]
+            
+        if improvement_areas:
+            improvement_focus = f"{student_first_name}, while your work demonstrates strong engagement with the content, focus on improving in the area(s) of: {', '.join(improvement_areas)} to maximize your synthesis of the concepts. {general_feedback_llm}"
+        else:
+            improvement_focus = f"Outstanding work {student_first_name}! You excelled on all sections of this assignment. {general_feedback_llm}"
     else:
         improvement_focus = f"Outstanding work {student_first_name}! You excelled on all sections of this assignment. {general_feedback_llm}"
 
@@ -797,12 +806,22 @@ SUBMISSION TEXT:
         # reading_score remains as set from Python detection
 
     # Identify lowest scoring component for General Feedback
-    weighted_scores = {
-        "Prompt Adherence and Key Terms": (local_scores['prompt_score'] + local_scores['key_terms_score']) / 4.0,
-        "Reading Reference": local_scores['reading_score'] / 4.0,
-        "Video Reference": local_scores['video_score'] / 4.0,
-        "Discussion Engagement": local_scores['engagement_score'] / 4.0
-    }
+    # For 15-point scale, we only consider 3 categories (excluding engagement)
+    if grading_scale == "15-point (3 categories)":
+        weighted_scores = {
+            "Prompt Adherence": local_scores['prompt_score'] / 2.0,
+            "Key Terms Usage": local_scores['key_terms_score'] / 2.0,
+            "Reading Reference": local_scores['reading_score'] / 4.0,
+            "Video Reference": local_scores['video_score'] / 4.0
+        }
+    else:  # 16-point (4 categories)
+        weighted_scores = {
+            "Prompt Adherence and Key Terms": (local_scores['prompt_score'] + local_scores['key_terms_score']) / 4.0,
+            "Reading Reference": local_scores['reading_score'] / 4.0,
+            "Video Reference": local_scores['video_score'] / 4.0,
+            "Discussion Engagement": local_scores['engagement_score'] / 4.0
+        }
+    
     sorted_improvement = sorted(weighted_scores.items(), key=lambda item: item[1])
     improvement_areas = [name for name, score in sorted_improvement if score < 1.0 and score > 0.0]
 
@@ -812,18 +831,20 @@ SUBMISSION TEXT:
     # Scale scores for 15-point system
     if grading_scale == "15-point (3 categories)":
         # Scale up the scores for 15-point scale (5 points per category)
-        scaled_prompt_key_score = (local_scores['prompt_score'] + local_scores['key_terms_score']) * 1.25  # Scale from 4.0 to 5.0
+        # For 15-point scale, prompt and key terms are 2.5 points each
+        scaled_prompt_score = local_scores['prompt_score'] * 1.25  # Scale from 2.0 to 2.5
+        scaled_key_terms_score = local_scores['key_terms_score'] * 1.25  # Scale from 2.0 to 2.5
         scaled_video_score = local_scores['video_score'] * 1.25  # Scale from 4.0 to 5.0
         scaled_reading_score = local_scores['reading_score'] * 1.25  # Scale from 4.0 to 5.0
-        scaled_total = scaled_prompt_key_score + scaled_video_score + scaled_reading_score
+        scaled_total = scaled_prompt_score + scaled_key_terms_score + scaled_video_score + scaled_reading_score
         
         # FIX: Keep scores as numeric values, not strings
         final_grades = {
-            "prompt_score": local_scores['prompt_score'],
-            "key_terms_score": local_scores['key_terms_score'],
+            "prompt_score": scaled_prompt_score,  # Use scaled value
+            "key_terms_score": scaled_key_terms_score,  # Use scaled value
             "video_score": scaled_video_score,  # Use scaled value
             "reading_score": scaled_reading_score,  # Use scaled value
-            "engagement_score": local_scores['engagement_score'],
+            "engagement_score": 0,  # Not used in 15-point scale
             "total_score": scaled_total,  # Use scaled total
         }
     else:
@@ -964,6 +985,18 @@ st.markdown("""
     div[data-baseweb="select"] div[role="listbox"] > div > div > div {
         color: black !important;
     }
+    /* Fix for selected text in dropdown */
+    div[data-baseweb="select"] div[role="listbox"] > div[data-selected="true"] {
+        color: black !important;
+    }
+    /* Fix for hover state in dropdown */
+    div[data-baseweb="select"] div[role="listbox"] > div:hover {
+        color: black !important;
+    }
+    /* Fix for dropdown arrow */
+    svg[data-testid="stSelectboxDropdownIcon"] {
+        fill: black !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1035,7 +1068,8 @@ if grading_scale == "15-point (3 categories)":
     <div class="scale-info">
     <h4>15-Point Scale (3 Categories)</h4>
     <ul>
-        <li>Prompt Adherence & Key Terms (5.0 points)</li>
+        <li>Prompt Adherence (2.5 points)</li>
+        <li>Key Terms (2.5 points)</li>
         <li>Reading Reference (5.0 points)</li>
         <li>Video Reference (5.0 points)</li>
     </ul>
