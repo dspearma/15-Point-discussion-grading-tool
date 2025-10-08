@@ -30,6 +30,47 @@ def validate_api_key(api_key: str) -> bool:
         return False
     return api_key.startswith("sk-or-v1-") and len(api_key) > 20
 
+def test_api_key(api_key: str):
+    """Test if the API key is valid by making a simple API call."""
+    if not api_key or not validate_api_key(api_key):
+        return False, "Invalid API key format"
+    
+    try:
+        api_url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "anthropic/claude-3-haiku",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Say 'API key is working' if you receive this message."
+                }
+            ],
+            "max_tokens": 50
+        }
+        
+        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("choices") and len(result["choices"]) > 0:
+                content = result["choices"][0]["message"]["content"]
+                if "API key is working" in content:
+                    return True, "API key is valid"
+                else:
+                    return True, f"API key is valid but unexpected response: {content}"
+            else:
+                return False, "Invalid response format"
+        else:
+            return False, f"API call failed with status {response.status_code}: {response.text}"
+            
+    except Exception as e:
+        return False, f"Error testing API key: {str(e)}"
+
 def strip_tags(text: str) -> str:
     """Removes HTML tags from a string."""
     pattern = re.compile(r'<[^>]*>')
@@ -102,17 +143,30 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
         if not api_key.startswith("sk-or-v1-"):
             raise ValueError(f"Invalid API key format. Expected format: sk-or-v1-...")
         
-        # Make sure the Authorization header is set correctly
-        headers["Authorization"] = f"Bearer {api_key}"
+        # Create a new headers dictionary to avoid any potential issues
+        new_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://your-app-url.com",  # Optional: Replace with your app URL
+            "X-Title": "Discussion Grading Tool"  # Optional: Replace with your app name
+        }
         
         # Debug: Print the first and last few characters of the API key (without exposing the full key)
         masked_key = f"{api_key[:10]}...{api_key[-10:]}"
         print(f"Using API key: {masked_key}")
+        print(f"Request URL: {api_url}")
+        print(f"Request headers: {new_headers}")
         
-        response = requests.post(api_url, headers=headers, json=payload, timeout=timeout)
+        # Make the API call
+        response = requests.post(api_url, headers=new_headers, json=payload, timeout=timeout)
+        
+        # Debug: Print response status and headers
+        print(f"Response status: {response.status_code}")
+        print(f"Response headers: {response.headers}")
         
         # Handle specific HTTP errors
         if response.status_code == 401:
+            print(f"Response body: {response.text}")
             raise ValueError("Authentication failed. Please check your API key.")
         elif response.status_code == 429:
             raise ValueError("Rate limit exceeded. Please try again later.")
@@ -584,10 +638,6 @@ def grade_submission_with_retries(
         try:
             # Prepare the API request
             api_url = "https://openrouter.ai/api/v1/chat/completions"
-            headers = {
-                "Content-Type": "application/json"
-            }
-            # Note: Authorization header will be set in robust_api_call
             
             # Create the grading prompt based on the grading scale
             if grading_scale == "15-point (3 categories)":
@@ -605,7 +655,7 @@ def grade_submission_with_retries(
                 3. Reading Reference (4.0 points): Did the student reference the assigned reading?
                 4. Video Reference (4.0 points): Did the student reference the assigned video?
                 """
-            
+
             payload = {
                 "model": "anthropic/claude-3-opus",
                 "messages": [
@@ -646,12 +696,11 @@ def grade_submission_with_retries(
                         }}
                         """
                     }
-                ],
-                "response_format": {"type": "json_object"}
+                ]
             }
             
             # Make the API call with retries
-            response_text = robust_api_call(api_url, headers, payload, api_key=api_key)
+            response_text = robust_api_call(api_url, {}, payload, api_key=api_key)
             api_results = robust_json_parsing(response_text)
             
             # Clean the API results
@@ -785,8 +834,8 @@ try:
     # Clean the API key to remove any extra quotes or whitespace
     api_key = api_key.strip().strip('"').strip("'")
     st.sidebar.success("API key loaded from Streamlit secrets")
-except (KeyError, FileNotFoundError):
-    pass
+except (KeyError, FileNotFoundError) as e:
+    st.sidebar.info(f"Could not load from Streamlit secrets: {str(e)}")
 
 # Try environment variable if not found in secrets
 if not api_key:
@@ -823,6 +872,16 @@ else:
     st.sidebar.error("No API key provided. Please enter your API key to continue.")
 
 st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)")
+
+# Test API key button
+if api_key and validate_api_key(api_key):
+    if st.sidebar.button("Test API Key"):
+        with st.sidebar.spinner("Testing API key..."):
+            is_valid, message = test_api_key(api_key)
+            if is_valid:
+                st.sidebar.success(message)
+            else:
+                st.sidebar.error(message)
 
 # Debug section to verify API key
 st.sidebar.markdown("---")
