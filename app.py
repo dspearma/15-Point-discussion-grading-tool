@@ -28,7 +28,7 @@ def validate_api_key(api_key: str) -> bool:
     """Validate the OpenRouter API key format."""
     if not api_key:
         return False
-    return api_key.startswith("sk-or-") and len(api_key) > 20
+    return api_key.startswith("sk-or-v1-") and len(api_key) > 20
 
 def strip_tags(text: str) -> str:
     """Removes HTML tags from a string."""
@@ -99,11 +99,15 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
             raise ValueError("No API key provided")
         
         # Ensure the API key is properly formatted
-        if not api_key.startswith("sk-or-"):
-            raise ValueError(f"Invalid API key format. Expected format: sk-or-...")
+        if not api_key.startswith("sk-or-v1-"):
+            raise ValueError(f"Invalid API key format. Expected format: sk-or-v1-...")
         
         # Make sure the Authorization header is set correctly
         headers["Authorization"] = f"Bearer {api_key}"
+        
+        # Debug: Print the first and last few characters of the API key (without exposing the full key)
+        masked_key = f"{api_key[:10]}...{api_key[-10:]}"
+        print(f"Using API key: {masked_key}")
         
         response = requests.post(api_url, headers=headers, json=payload, timeout=timeout)
         
@@ -778,6 +782,8 @@ api_key_source = "Not set"
 try:
     api_key = st.secrets["OPENROUTER_API_KEY"]
     api_key_source = "Streamlit secrets"
+    # Clean the API key to remove any extra quotes or whitespace
+    api_key = api_key.strip().strip('"').strip("'")
     st.sidebar.success("API key loaded from Streamlit secrets")
 except (KeyError, FileNotFoundError):
     pass
@@ -787,13 +793,15 @@ if not api_key:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if api_key:
         api_key_source = "Environment variable"
+        # Clean the API key to remove any extra quotes or whitespace
+        api_key = api_key.strip().strip('"').strip("'")
         st.sidebar.success("API key loaded from environment variable")
 
 # Fallback to user input
 if not api_key:
     api_key_input = st.sidebar.text_input("OpenRouter API Key", type="password", help="Enter your OpenRouter API key")
     if api_key_input:
-        api_key = api_key_input
+        api_key = api_key_input.strip()
         api_key_source = "User input"
 else:
     # If we already have an API key, show a masked input
@@ -804,14 +812,26 @@ if api_key:
     st.sidebar.info(f"API key source: {api_key_source}")
     
     # Validate the API key format
-    if api_key.startswith("sk-or-") and len(api_key) > 20:
+    if api_key.startswith("sk-or-v1-") and len(api_key) > 20:
         st.sidebar.success("API key format appears valid")
+        # Show first and last few characters for verification
+        masked_key = f"{api_key[:10]}...{api_key[-10:]}"
+        st.sidebar.info(f"API key: {masked_key}")
     else:
-        st.sidebar.error("Invalid API key format. OpenRouter API keys should start with 'sk-or-' and be at least 20 characters long.")
+        st.sidebar.error("Invalid API key format. OpenRouter API keys should start with 'sk-or-v1-' and be at least 20 characters long.")
 else:
     st.sidebar.error("No API key provided. Please enter your API key to continue.")
 
 st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)")
+
+# Debug section to verify API key
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Debug Information")
+if api_key:
+    st.sidebar.code(f"API key starts with: {api_key[:12]}")
+    st.sidebar.code(f"API key ends with: {api_key[-12:]}")
+    st.sidebar.code(f"API key length: {len(api_key)}")
+    st.sidebar.code(f"API key format valid: {validate_api_key(api_key)}")
 
 # Add grading scale selector
 grading_scale = st.sidebar.selectbox(
@@ -882,7 +902,7 @@ if csv_file and docx_file:
         if not api_key:
             st.error("Please enter your OpenRouter API key in the sidebar.")
         elif not validate_api_key(api_key):
-            st.error("Invalid API key format. OpenRouter API keys should start with 'sk-or-' and be at least 20 characters long.")
+            st.error("Invalid API key format. OpenRouter API keys should start with 'sk-or-v1-' and be at least 20 characters long.")
         else:
             with st.spinner("Processing files... This may take a few minutes."):
                 try:
