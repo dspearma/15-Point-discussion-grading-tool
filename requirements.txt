@@ -4,3 +4,4 @@ python-Levenshtein
 requests
 pandas
 plotly
+python-dotenv
