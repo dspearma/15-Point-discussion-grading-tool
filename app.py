@@ -12,6 +12,11 @@ import math
 from typing import Dict, Any, List, Union
 from difflib import SequenceMatcher
 import plotly.express as px
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 try:
@@ -62,14 +67,19 @@ def test_api_key(api_key: str):
                 if "API key is working" in content:
                     return True, "API key is valid"
                 else:
-                    return True, f"API key is valid but unexpected response: {content}"
+                    return True, f"API key is valid but unexpected response: {content[:50]}..."
             else:
                 return False, "Invalid response format"
         else:
-            return False, f"API call failed with status {response.status_code}: {response.text}"
+            # Don't expose the full response text to avoid potential data leaks
+            return False, f"API call failed with status {response.status_code}"
             
+    except requests.exceptions.RequestException as e:
+        # Don't expose the full exception to avoid potential data leaks
+        return False, "Network error occurred while testing API key"
     except Exception as e:
-        return False, f"Error testing API key: {str(e)}"
+        # Don't expose the full exception to avoid potential data leaks
+        return False, "An error occurred while testing API key"
 
 def strip_tags(text: str) -> str:
     """Removes HTML tags from a string."""
@@ -129,7 +139,7 @@ def retry_with_backoff(func, max_retries: int = 3, base_delay: int = 5, max_dela
                 raise e
 
             delay = min(base_delay * (2 ** attempt), max_delay)
-            print(f"⚠️ Attempt {attempt + 1} failed: {e}. Retrying in {delay} seconds...")
+            logger.warning(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay} seconds...")
             time.sleep(delay)
 
 def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 60, max_retries: int = 3, api_key: str = None) -> str:
@@ -146,27 +156,22 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
         # Create a new headers dictionary to avoid any potential issues
         new_headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://your-app-url.com",  # Optional: Replace with your app URL
-            "X-Title": "Discussion Grading Tool"  # Optional: Replace with your app name
+            "Content-Type": "application/json"
         }
         
-        # Debug: Print the first and last few characters of the API key (without exposing the full key)
+        # Debug: Log the first and last few characters of the API key (without exposing the full key)
         masked_key = f"{api_key[:10]}...{api_key[-10:]}"
-        print(f"Using API key: {masked_key}")
-        print(f"Request URL: {api_url}")
-        print(f"Request headers: {new_headers}")
+        logger.info(f"Using API key: {masked_key}")
+        logger.info(f"Request URL: {api_url}")
         
         # Make the API call
         response = requests.post(api_url, headers=new_headers, json=payload, timeout=timeout)
         
-        # Debug: Print response status and headers
-        print(f"Response status: {response.status_code}")
-        print(f"Response headers: {response.headers}")
+        # Debug: Log response status
+        logger.info(f"Response status: {response.status_code}")
         
         # Handle specific HTTP errors
         if response.status_code == 401:
-            print(f"Response body: {response.text}")
             raise ValueError("Authentication failed. Please check your API key.")
         elif response.status_code == 429:
             raise ValueError("Rate limit exceeded. Please try again later.")
@@ -204,7 +209,7 @@ def robust_json_parsing(response_text: str, max_retries: int = 2) -> Dict:
         try:
             return json.loads(response_text_clean)
         except json.JSONDecodeError as e:
-            print(f"Initial JSON parse failed: {e}. Attempting extraction.")
+            logger.warning(f"Initial JSON parse failed: {str(e)}. Attempting extraction.")
 
             # Use regex to find the likely JSON object
             json_match = re.search(r'\{.*\}', response_text_clean, re.DOTALL)
@@ -213,7 +218,7 @@ def robust_json_parsing(response_text: str, max_retries: int = 2) -> Dict:
                 try:
                     return json.loads(extracted_json)
                 except json.JSONDecodeError as e2:
-                    raise ValueError(f"Could not parse valid JSON even after extraction: {e2}")
+                    raise ValueError(f"Could not parse valid JSON even after extraction: {str(e2)}")
 
             raise ValueError(f"Could not find or parse valid JSON structure: {str(e)}")
 
@@ -706,8 +711,14 @@ def grade_submission_with_retries(
             # Clean the API results
             api_results = recursively_clean(api_results)
             
-        except Exception as e:
+        except ValueError as e:
+            # Handle specific ValueError exceptions (like authentication errors)
             st.error(f"API Error: {str(e)}")
+            api_results = {}
+        except Exception as e:
+            # Handle other exceptions without exposing the full error message
+            logger.error(f"Unexpected error in API call: {str(e)}")
+            st.error("An unexpected error occurred while calling the API. Please try again later.")
             api_results = {}
     else:
         if not api_key:
@@ -835,7 +846,7 @@ try:
     api_key = api_key.strip().strip('"').strip("'")
     st.sidebar.success("API key loaded from Streamlit secrets")
 except (KeyError, FileNotFoundError) as e:
-    st.sidebar.info(f"Could not load from Streamlit secrets: {str(e)}")
+    logger.info(f"Could not load from Streamlit secrets: {str(e)}")
 
 # Try environment variable if not found in secrets
 if not api_key:
@@ -876,12 +887,12 @@ st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)"
 # Test API key button
 if api_key and validate_api_key(api_key):
     if st.sidebar.button("Test API Key"):
-        with st.sidebar.spinner("Testing API key..."):
+        with st.spinner("Testing API key..."):
             is_valid, message = test_api_key(api_key)
             if is_valid:
-                st.sidebar.success(message)
+                st.success(message)
             else:
-                st.sidebar.error(message)
+                st.error(message)
 
 # Debug section to verify API key
 st.sidebar.markdown("---")
