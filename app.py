@@ -783,7 +783,7 @@ SUBMISSION TEXT:
             api_url = "https://openrouter.ai/api/v1/chat/completions"
             
             payload = {
-                "model": "anthropic/claude-3-opus",
+                "model": "google/gemini-2.5-flash-preview-09-2025",
                 "messages": [{"role": "user", "content": prompt_for_llm}],
                 "temperature": 0.1,
                 "response_format": {"type": "json_object"},
