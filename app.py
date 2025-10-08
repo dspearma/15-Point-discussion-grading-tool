@@ -587,17 +587,25 @@ def grade_submission_with_retries(
         author_match = re.search(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', reading_text.strip())
         assigned_author = author_match.group(1).strip() if author_match else ""
 
-    # Look for "pages" followed by page numbers
-    pages_match = re.search(r'pages\s+([\d.,\s]+)', reading_text, re.IGNORECASE)
-
-    # Extract page numbers and convert to a list
+    # Look for page numbers in various formats
     page_numbers = []
-    if pages_match:
-        page_str = pages_match.group(1)
-        # Handle various page formats like "3.1, 3.2, 3.3, and 3.4" or "10-15" or "10, 12, 14"
-        page_numbers = re.findall(r'[\d.]+', page_str)
-        # Convert to float for comparison
-        page_numbers = [float(p) for p in page_numbers]
+    
+    # Try multiple patterns to extract page numbers
+    patterns = [
+        r'pages?\s+([\d.,\s-]+)',  # pages 81-83 or page 81
+        r'p\.?\s*([\d.,\s-]+)',    # p.81 or p 81
+        r'([\d.,\s-]+)'            # just numbers (fallback)
+    ]
+
+    for pattern in patterns:
+        pages_match = re.search(pattern, reading_text, re.IGNORECASE)
+        if pages_match:
+            page_str = pages_match.group(1)
+            # Handle various page formats like "3.1, 3.2, 3.3, and 3.4" or "10-15" or "10, 12, 14"
+            page_numbers = re.findall(r'[\d.]+', page_str)
+            # Convert to float for comparison
+            page_numbers = [float(p) for p in page_numbers]
+            break
 
     # Set reading info based on extracted data
     if assigned_author:
@@ -632,12 +640,22 @@ def grade_submission_with_retries(
         detected_pages = []
         if page_numbers:
             for page in page_numbers:
-                # Convert to string for searching
-                page_str = str(page)
-                # Look for the page number in the submission
-                if re.search(r'\b' + re.escape(page_str) + r'\b', submission_text):
-                    page_present = True
-                    detected_pages.append(page_str)
+                # Convert to string for searching (fix the float conversion issue)
+                page_str = str(int(page)) if isinstance(page, float) and page.is_integer() else str(page)
+                
+                # Look for the page number in various formats
+                patterns = [
+                    r'\b' + re.escape(page_str) + r'\b',  # Just the number: 81
+                    r'\bp\.?\s*' + re.escape(page_str) + r'\b',  # p.81 or p 81
+                    r'\bpage\s*' + re.escape(page_str) + r'\b',  # page 81
+                    r'\bpages?\s*' + re.escape(page_str) + r'\b'  # page 81 or pages 81
+                ]
+                
+                for pattern in patterns:
+                    if re.search(pattern, submission_text, re.IGNORECASE):
+                        page_present = True
+                        detected_pages.append(page_str)
+                        break
 
         # Determine score based on author and page presence
         if author_present and page_present:
