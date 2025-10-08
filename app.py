@@ -12,11 +12,6 @@ import math
 from typing import Dict, Any, List, Union
 from difflib import SequenceMatcher
 import plotly.express as px
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Load environment variables
 try:
@@ -34,57 +29,6 @@ def validate_api_key(api_key: str) -> bool:
     if not api_key:
         return False
     return api_key.startswith("sk-or-v1-") and len(api_key) > 20
-
-def test_api_key_direct(api_key: str):
-    """Test if the API key is valid by making a simple API call with minimal parameters."""
-    if not api_key or not validate_api_key(api_key):
-        return False, "Invalid API key format"
-    
-    try:
-        api_url = "https://openrouter.ai/api/v1/chat/completions"
-        
-        # Use the simplest possible request
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": "anthropic/claude-3-haiku",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Say 'API key is working'"
-                }
-            ],
-            "max_tokens": 10
-        }
-        
-        # Log the request details for debugging
-        logger.info(f"Making direct API call to: {api_url}")
-        logger.info(f"API key format: {api_key[:10]}...{api_key[-10:]}")
-        
-        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-        
-        logger.info(f"Response status code: {response.status_code}")
-        
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("choices") and len(result["choices"]) > 0:
-                content = result["choices"][0]["message"]["content"]
-                return True, f"API key is working. Response: {content}"
-            else:
-                return False, "Invalid response format"
-        else:
-            # Log the response text for debugging
-            logger.error(f"API call failed with status {response.status_code}")
-            logger.error(f"Response headers: {response.headers}")
-            logger.error(f"Response body: {response.text}")
-            return False, f"API call failed with status {response.status_code}. Response: {response.text[:200]}"
-            
-    except Exception as e:
-        logger.error(f"Error in direct API test: {str(e)}")
-        return False, f"Error testing API key: {str(e)}"
 
 def strip_tags(text: str) -> str:
     """Removes HTML tags from a string."""
@@ -144,7 +88,6 @@ def retry_with_backoff(func, max_retries: int = 3, base_delay: int = 5, max_dela
                 raise e
 
             delay = min(base_delay * (2 ** attempt), max_delay)
-            logger.warning(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay} seconds...")
             time.sleep(delay)
 
 def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 60, max_retries: int = 3, api_key: str = None) -> str:
@@ -161,23 +104,16 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
         # Create a new headers dictionary to avoid any potential issues
         new_headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://your-app-url.com",
+            "X-Title": "Discussion Grading Tool"
         }
-        
-        # Debug: Log the first and last few characters of the API key (without exposing the full key)
-        masked_key = f"{api_key[:10]}...{api_key[-10:]}"
-        logger.info(f"Using API key: {masked_key}")
-        logger.info(f"Request URL: {api_url}")
         
         # Make the API call
         response = requests.post(api_url, headers=new_headers, json=payload, timeout=timeout)
         
-        # Debug: Log response status
-        logger.info(f"Response status: {response.status_code}")
-        
         # Handle specific HTTP errors
         if response.status_code == 401:
-            logger.error(f"Authentication failed. Response: {response.text}")
             raise ValueError("Authentication failed. Please check your API key.")
         elif response.status_code == 429:
             raise ValueError("Rate limit exceeded. Please try again later.")
@@ -215,8 +151,6 @@ def robust_json_parsing(response_text: str, max_retries: int = 2) -> Dict:
         try:
             return json.loads(response_text_clean)
         except json.JSONDecodeError as e:
-            logger.warning(f"Initial JSON parse failed: {str(e)}. Attempting extraction.")
-
             # Use regex to find the likely JSON object
             json_match = re.search(r'\{.*\}', response_text_clean, re.DOTALL)
             if json_match:
@@ -723,7 +657,6 @@ def grade_submission_with_retries(
             api_results = {}
         except Exception as e:
             # Handle other exceptions without exposing the full error message
-            logger.error(f"Unexpected error in API call: {str(e)}")
             st.error("An unexpected error occurred while calling the API. Please try again later.")
             api_results = {}
     else:
@@ -809,7 +742,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for better styling with black text
 st.markdown("""
 <style>
     .main-header {
@@ -823,12 +756,21 @@ st.markdown("""
         border-radius: 0.5rem;
         margin-bottom: 1rem;
     }
+    .info-box h3 {
+        color: black !important;
+    }
     .scale-info {
         background-color: #e8f4f8;
         padding: 1rem;
         border-radius: 0.5rem;
         margin-bottom: 1rem;
         border-left: 5px solid #1f77b4;
+    }
+    .step-button {
+        color: black !important;
+    }
+    .download-button {
+        color: black !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -851,8 +793,8 @@ try:
     # Clean the API key to remove any extra quotes or whitespace
     api_key = api_key.strip().strip('"').strip("'")
     st.sidebar.success("API key loaded from Streamlit secrets")
-except (KeyError, FileNotFoundError) as e:
-    logger.info(f"Could not load from Streamlit secrets: {str(e)}")
+except (KeyError, FileNotFoundError):
+    pass
 
 # Try environment variable if not found in secrets
 if not api_key:
@@ -880,34 +822,12 @@ if api_key:
     # Validate the API key format
     if api_key.startswith("sk-or-v1-") and len(api_key) > 20:
         st.sidebar.success("API key format appears valid")
-        # Show first and last few characters for verification
-        masked_key = f"{api_key[:10]}...{api_key[-10:]}"
-        st.sidebar.info(f"API key: {masked_key}")
     else:
         st.sidebar.error("Invalid API key format. OpenRouter API keys should start with 'sk-or-v1-' and be at least 20 characters long.")
 else:
     st.sidebar.error("No API key provided. Please enter your API key to continue.")
 
 st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)")
-
-# Test API key button
-if api_key and validate_api_key(api_key):
-    if st.sidebar.button("Test API Key"):
-        with st.spinner("Testing API key..."):
-            is_valid, message = test_api_key_direct(api_key)
-            if is_valid:
-                st.success(message)
-            else:
-                st.error(message)
-
-# Debug section to verify API key
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Debug Information")
-if api_key:
-    st.sidebar.code(f"API key starts with: {api_key[:12]}")
-    st.sidebar.code(f"API key ends with: {api_key[-12:]}")
-    st.sidebar.code(f"API key length: {len(api_key)}")
-    st.sidebar.code(f"API key format valid: {validate_api_key(api_key)}")
 
 # Add grading scale selector
 grading_scale = st.sidebar.selectbox(
@@ -948,7 +868,7 @@ st.sidebar.markdown("---")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown('<div class="info-box"><h3>Step 1: Upload Files</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box"><h3 class="step-button">Step 1: Upload Files</h3></div>', unsafe_allow_html=True)
     csv_file = st.file_uploader("Upload CSV file with student submissions", type=['csv'], key="csv_uploader")
     st.markdown("The CSV should contain columns for student names, initial posts, and replies.")
     
@@ -959,7 +879,7 @@ with col1:
         st.info("Please upload a CSV file to continue.")
 
 with col2:
-    st.markdown('<div class="info-box"><h3>Step 2: Upload Lesson Plan</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box"><h3 class="step-button">Step 2: Upload Lesson Plan</h3></div>', unsafe_allow_html=True)
     docx_file = st.file_uploader("Upload DOCX lesson plan", type=['docx'], key="docx_uploader")
     st.markdown("The lesson plan should contain discussion prompts, reading assignments, and key terms.")
     
@@ -972,7 +892,7 @@ with col2:
 # Process files when both are uploaded
 if csv_file and docx_file:
     st.markdown("---")
-    st.markdown('<div class="info-box"><h3>Step 3: Process Files</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box"><h3 class="step-button">Step 3: Process Files</h3></div>', unsafe_allow_html=True)
     
     if st.button("🚀 Process Files", type="primary"):
         if not api_key:
@@ -989,10 +909,6 @@ if csv_file and docx_file:
                     # Read files
                     csv_content = csv_file.read()
                     docx_content = docx_file.read()
-                    
-                    # Debug information
-                    st.write(f"CSV file size: {len(csv_content)} bytes")
-                    st.write(f"DOCX file size: {len(docx_content)} bytes")
                     
                     # Add a progress bar
                     progress_bar = st.progress(0)
@@ -1103,12 +1019,14 @@ if csv_file and docx_file:
                     base_filename = os.path.splitext(original_filename)[0]  # Remove .csv extension
                     graded_filename = f"{base_filename}_GRADED.csv"
 
+                    st.markdown('<div class="download-button">', unsafe_allow_html=True)
                     st.download_button(
                         label="📥 Download Graded CSV",
                         data=csv_output,
                         file_name=graded_filename,
                         mime="text/csv"
                     )
+                    st.markdown('</div>', unsafe_allow_html=True)
                     
                 except Exception as e:
                     st.error(f"An error occurred: {str(e)}")
