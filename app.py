@@ -127,7 +127,7 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
             raise ValueError("Invalid API response format - missing choices")
 
         if result["choices"][0]["message"]["content"] is None:
-             raise ValueError("Empty content block received from API.")
+                 raise ValueError("Empty content block received from API.")
 
         grade_response = result["choices"][0]["message"]["content"]
         if not grade_response.strip():
@@ -386,7 +386,7 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
             'because', 'however', 'although', 'critical', 'analysis', 'blueprint',
             'therefore', 'moreover', 'furthermore', 'in contrast', 'similarly',
             'for example', 'for instance', 'this suggests', 'this demonstrates',
-            'evidence shows', 'research indicates', 'as shown by', 'considering that'
+            'evidence shows', 'research indicates', 'as shown by', 'considering that', 'but'
         ]
 
         # Check for engagement indicators
@@ -433,7 +433,7 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
         else:
             name_match_only = re.search(r'^([A-Za-z]+),', highest_quality_reply.strip())
             if name_match_only:
-                 recipient_name = name_match_only.group(1).strip()
+                   recipient_name = name_match_only.group(1).strip()
 
     # Generate specific feedback for point deductions
     if highest_quality_score >= 4.0:
@@ -614,6 +614,7 @@ def grade_submission_with_retries(
         reading_info['author_last_name'] = ""
 
     if page_numbers:
+        page_numbers.sort()
         # Format page range for feedback - fix for issue 1
         if len(page_numbers) == 1:
             page_num = page_numbers[0]
@@ -621,29 +622,21 @@ def grade_submission_with_retries(
                 reading_info['page_range_expected'] = f"page {int(page_num)}"
             else:
                 reading_info['page_range_expected'] = f"page {page_num}"
-        else:
-            # Check if it's a range (consecutive numbers)
-            is_range = False
-            if len(page_numbers) == 2 and page_numbers[1] > page_numbers[0]:
-                diff = page_numbers[1] - page_numbers[0]
-                if diff <= 10:  # Assume it's a range if difference is small
-                    is_range = True
-            
-            if is_range:
-                # Use hyphen for ranges
-                if page_numbers[0].is_integer() and page_numbers[1].is_integer():
-                    reading_info['page_range_expected'] = f"pages {int(page_numbers[0])}-{int(page_numbers[1])}"
-                else:
-                    reading_info['page_range_expected'] = f"pages {page_numbers[0]}-{page_numbers[1]}"
+        elif len(page_numbers) == 2:
+            # Always use a hyphen for two pages, which are now sorted
+            if page_numbers[0].is_integer() and page_numbers[1].is_integer():
+                reading_info['page_range_expected'] = f"pages {int(page_numbers[0])}-{int(page_numbers[1])}"
             else:
-                # Use comma for non-consecutive pages
-                formatted_pages = []
-                for p in page_numbers:
-                    if p.is_integer():
-                        formatted_pages.append(str(int(p)))
-                    else:
-                        formatted_pages.append(str(p))
-                reading_info['page_range_expected'] = f"pages {', '.join(formatted_pages)}"
+                reading_info['page_range_expected'] = f"pages {page_numbers[0]}-{page_numbers[1]}"
+        else:
+            # Use a comma for lists of three or more pages
+            formatted_pages = []
+            for p in page_numbers:
+                if p.is_integer():
+                    formatted_pages.append(str(int(p)))
+                else:
+                    formatted_pages.append(str(p))
+            reading_info['page_range_expected'] = f"pages {', '.join(formatted_pages)}"
     else:
         reading_info['page_range_expected'] = "unspecified pages"
 
