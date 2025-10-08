@@ -1115,10 +1115,15 @@ if csv_file and docx_file:
                         
                         # Download button
                         csv_output = df.to_csv(index=False)
+                        # Get the original filename and append _GRADED.csv
+                        original_filename = csv_file.name
+                        base_filename = os.path.splitext(original_filename)[0]  # Remove .csv extension
+                        graded_filename = f"{base_filename}_GRADED.csv"
+
                         st.download_button(
                             label="📥 Download Graded CSV",
                             data=csv_output,
-                            file_name="graded_discussions.csv",
+                            file_name=graded_filename,
                             mime="text/csv"
                         )
                     else:
