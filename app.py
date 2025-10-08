@@ -349,6 +349,108 @@ def detect_key_terms_presence(submission_text: str, key_terms: List[str]) -> Lis
 
     return list(set(detected_terms))
 
+def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
+    replies = [fix_encoding(reply) for reply in replies]
+    valid_replies = [reply for reply in replies if reply and len(reply.split()) >= 10]
+    num_replies = len(valid_replies)
+
+    if num_replies == 0:
+        return {
+            'score': 2.0,
+            'feedback': 'We encourage you to participate in peer discussion! Substantive replies engage with at least one classmate.',
+            'num_replies': 0,
+            'highest_quality_score': 2.0
+        }
+
+    reply_quality_scores = []
+
+    for reply in valid_replies:
+        reply_lower = reply.lower()
+        word_count = len(reply.split())
+        quality_score = 3.0
+
+        # Indicators of deep engagement (expanded and more flexible)
+        deep_engagement_indicators = [
+            'i disagree', 'i believe that', 'i believe it', 'i agree that', 'i understand',
+            'building on', 'contrary to', 'critique', 'elaborate', 'perspective', 'i appreciated',
+            'can you relate', 'in addition to', 'i think', 'surprised by', 'recommend',
+            'interesting point', 'you mentioned', 'your point about', 'i would argue',
+            'similar to what you said', 'expanding on', 'different perspective', 'your analysis',
+            'i noticed', 'as you pointed out', 'building upon', 'along those lines',
+            'your observation', 'another way to think', 'i wonder if', 'what if we consider'
+        ]
+
+        # Indicators of supporting arguments (expanded)
+        supporting_indicators = [
+            'because', 'however', 'although', 'critical', 'analysis', 'blueprint',
+            'therefore', 'moreover', 'furthermore', 'in contrast', 'similarly',
+            'for example', 'for instance', 'this suggests', 'this demonstrates',
+            'evidence shows', 'research indicates', 'as shown by', 'considering that'
+        ]
+
+        # Check for engagement indicators
+        has_deep_engagement = any(term in reply_lower for term in deep_engagement_indicators)
+        has_supporting_args = any(term in reply_lower for term in supporting_indicators)
+
+        # Check for question marks (asking thoughtful questions)
+        has_questions = '?' in reply
+
+        # Check for specific examples or concrete details (numbers, names, specific events)
+        has_specific_details = bool(re.search(r'\b\d+\b', reply)) or bool(re.search(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:argued|stated|mentioned|noted|wrote|said)', reply))
+
+        # Scoring logic - more generous and quality-focused
+        if word_count >= 75 and (has_deep_engagement or has_supporting_args or has_specific_details):
+            quality_score = 4.0
+        elif word_count >= 60 and (has_deep_engagement or has_supporting_args):
+            quality_score = 4.0
+        elif word_count >= 50 and has_deep_engagement and has_supporting_args:
+            quality_score = 4.0
+        elif word_count >= 50 and (has_deep_engagement or has_supporting_args or has_questions):
+            quality_score = 3.5
+        elif word_count >= 40 and (has_deep_engagement or has_supporting_args):
+            quality_score = 3.5
+        elif word_count >= 25:
+            quality_score = 3.0
+        else:
+            quality_score = 3.0
+
+        quality_score = min(4.0, quality_score)
+        quality_score = round_nearest_half(quality_score)
+        reply_quality_scores.append(quality_score)
+
+    highest_quality_score = max(reply_quality_scores)
+
+    recipient_name = "a peer"
+    if valid_replies:
+        highest_quality_index = reply_quality_scores.index(highest_quality_score)
+        highest_quality_reply = valid_replies[highest_quality_index]
+
+        name_match = re.search(r'^(?:Hello|Hi|Dear|Hey|To)\s+([A-Za-z]+)\s*([A-Za-z]*),?', highest_quality_reply.strip(), re.IGNORECASE)
+
+        if name_match:
+            recipient_name = name_match.group(1).strip()
+        else:
+            name_match_only = re.search(r'^([A-Za-z]+),', highest_quality_reply.strip())
+            if name_match_only:
+                 recipient_name = name_match_only.group(1).strip()
+
+    # Generate specific feedback for point deductions
+    if highest_quality_score >= 4.0:
+        feedback = f"Excellent engagement! Your reply to {recipient_name} demonstrates substantive interaction with their ideas, showing depth of analysis and critical thinking that meets the highest standards for peer discussion."
+    elif highest_quality_score >= 3.5:
+        feedback = f"Strong engagement. Your meaningful reply to {recipient_name} shows good interaction with their ideas. Your response demonstrates solid understanding and contributes meaningfully to the discussion. To earn full credit (4.0), consider adding more detailed analysis, specific examples, or deeper critical engagement with your peers' arguments."
+    elif highest_quality_score >= 3.0:
+        feedback = f"Adequate engagement. Your contribution meets the substantive length requirement. To strengthen future replies, consider adding more detailed analysis, specific examples, or deeper critical engagement with your peers' arguments. Points were deducted because your response lacked the depth of analysis expected for higher credit."
+    else:
+        feedback = 'Your participation meets the minimum requirement, but your replies lack substantive length or meaningful interaction. Focus on directly responding to and debating your peers\' ideas in detail. Points were deducted because your response was too brief or did not engage substantively with your peers\' ideas.'
+
+    return {
+        'score': highest_quality_score,
+        'feedback': feedback,
+        'num_replies': num_replies,
+        'highest_quality_score': highest_quality_score
+    }
+
 def construct_final_feedback(
     llm_results: Dict,
     local_scores: Dict[str, float],
@@ -365,6 +467,8 @@ def construct_final_feedback(
 
     def transform_to_second_person(text):
         if not text: return ""
+        # Fix the "you's" issue by replacing it with "you are"
+        text = re.sub(r'\byou\'s\b', 'you are', text, flags=re.IGNORECASE)
         text = re.sub(r'\b(The student|This student|They|Their|He|His|She|Her)\b', lambda m: {'The student': 'You', 'This student': 'You', 'They': 'You', 'Their': 'Your', 'He': 'You', 'His': 'Your', 'She': 'You', 'Her': 'Your'}.get(m.group(1), m.group(1)), text, flags=re.IGNORECASE)
         if text:
             text = text.strip()
@@ -392,12 +496,14 @@ def construct_final_feedback(
         key_terms_score = local_scores['key_terms_score']
         reading_score = local_scores['reading_score']
         video_score = local_scores['video_score']
+        engagement_score = local_scores.get('engagement_score', 0.0)
         total_points = 16.0
         
-        prompt_formatted = f"PROMPT ADHERENCE [{prompt_score:.1f}/4.0]: {prompt_feedback.strip()}."
-        key_terms_formatted = f"KEY TERMS USAGE [{key_terms_score:.1f}/4.0]: {key_terms_feedback.strip()}."
+        prompt_formatted = f"PROMPT ADHERENCE [{prompt_score:.1f}/2.0]: {prompt_feedback.strip()}."
+        key_terms_formatted = f"KEY TERMS USAGE [{key_terms_score:.1f}/2.0]: {key_terms_feedback.strip()}."
         video_formatted = f"REFERENCE TO VIDEO [{video_score:.1f}/4.0]: {video_feedback}."
         reading_formatted = f"REFERENCE TO READING [{reading_score:.1f}/4.0]: {reading_feedback}."
+        engagement_formatted = f"DISCUSSION ENGAGEMENT [{engagement_score:.1f}/4.0]: {local_feedback.get('engagement_feedback', 'Feedback missing for engagement.')}"
 
     if improvement_areas:
         improvement_focus = f"{student_first_name}, while your work demonstrates strong engagement with the content, focus on improving in the area(s) of: {', '.join(improvement_areas)} to maximize your synthesis of the concepts. {general_feedback_llm}"
@@ -420,6 +526,7 @@ def construct_final_feedback(
             key_terms_formatted,
             video_formatted,
             reading_formatted,
+            engagement_formatted,
             general_formatted
         ])
 
@@ -518,6 +625,11 @@ def grade_submission_with_retries(
         "video_title": video_title if video_title else "Unknown"
     }
 
+    # --- Analyze Engagement Quality ---
+    engagement_analysis = analyze_engagement_quality(replies)
+    engagement_score = engagement_analysis['score']
+    engagement_feedback = engagement_analysis['feedback']
+
     # --- Local Scoring ---
     local_scores = {}
     local_feedback = {}
@@ -525,9 +637,9 @@ def grade_submission_with_retries(
 
     # Key Terms Scoring
     key_terms_ratio = len(detected_terms) / len(key_terms) if key_terms else 0
-    key_terms_score = round_nearest_half(min(5.0, key_terms_ratio * 5.0))
+    key_terms_score = round_nearest_half(min(2.0, key_terms_ratio * 2.0))
     key_terms_feedback = f"You used {len(detected_terms)} of {len(key_terms)} key terms: {detected_terms_str}."
-    if key_terms_score < 2.5:
+    if key_terms_score < 1.0:
         improvement_areas.append("incorporating key terms")
 
     # Reading Reference Scoring
@@ -537,14 +649,14 @@ def grade_submission_with_retries(
     
     reading_score = 0.0
     if reading_mentioned_local and author_mentioned:
-        reading_score = 5.0
+        reading_score = 4.0
     elif reading_mentioned_local or author_mentioned:
-        reading_score = 2.5
+        reading_score = 2.0
     
     reading_feedback = ""
-    if reading_score == 5.0:
+    if reading_score == 4.0:
         reading_feedback = f"You effectively referenced the assigned reading by {reading_info['assigned_author']}."
-    elif reading_score == 2.5:
+    elif reading_score == 2.0:
         if reading_mentioned_local:
             reading_feedback = "You mentioned the reading but could be more specific about the author or concepts."
         else:
@@ -560,14 +672,14 @@ def grade_submission_with_retries(
     
     video_score = 0.0
     if video_mentioned_local and video_mentioned_in_submission:
-        video_score = 5.0
+        video_score = 4.0
     elif video_mentioned_local or video_mentioned_in_submission:
-        video_score = 2.5
+        video_score = 2.0
     
     video_feedback = ""
-    if video_score == 5.0:
+    if video_score == 4.0:
         video_feedback = "You effectively referenced the assigned video content in your response."
-    elif video_score == 2.5:
+    elif video_score == 2.0:
         if video_mentioned_local:
             video_feedback = "You mentioned video content but could strengthen the connection to specific concepts."
         else:
@@ -594,11 +706,12 @@ def grade_submission_with_retries(
                 """
             else:  # 16-point (4 categories)
                 scoring_system = """
-                Please score the student's response on a 4-point scale for each category:
-                1. Prompt Adherence (4.0 points): Did the student directly address the prompt?
-                2. Key Terms Usage (4.0 points): Did the student use the key terms appropriately?
-                3. Reading Reference (4.0 points): Did the student reference the assigned reading?
-                4. Video Reference (4.0 points): Did the student reference the assigned video?
+                Please score the student's response on the following scale:
+                1. Prompt Adherence (2.0 points): How well does the student address the entire prompt?
+                2. Key Terms Usage (2.0 points): Did the student use at least one key term in a way that demonstrates contextual understanding?
+                3. Reading Reference (4.0 points): How specific and relevant is the use of the assigned reading material?
+                4. Video Reference (4.0 points): How specific and relevant is the use of the assigned video material?
+                5. Discussion Engagement (4.0 points): This is scored separately based on peer replies.
                 """
 
             payload = {
@@ -673,10 +786,10 @@ def grade_submission_with_retries(
             reading_score = api_results.get("reading_score", 0)
             video_score = api_results.get("video_score", 0)
         else:  # 16-point (4 categories)
-            prompt_score = api_results.get("prompt_adherence", 0)
-            key_terms_score = api_results.get("key_terms_score", 0)
-            reading_score = api_results.get("reading_score", 0)
-            video_score = api_results.get("video_score", 0)
+            prompt_score = min(2.0, max(1.0, float(api_results.get("prompt_adherence", 1.0))))
+            key_terms_score = min(2.0, max(1.0, float(api_results.get("key_terms_score", 1.0))))
+            reading_score = min(4.0, max(2.0, float(api_results.get("reading_score", 2.0))))
+            video_score = min(4.0, max(2.0, float(api_results.get("video_score", 2.0))))
     else:
         # Use local scores
         if grading_scale == "15-point (3 categories)":
@@ -684,7 +797,7 @@ def grade_submission_with_retries(
             reading_score = reading_score
             video_score = video_score
         else:  # 16-point (4 categories)
-            prompt_score = 4.0  # Assuming perfect prompt adherence if no API
+            prompt_score = 2.0  # Assuming perfect prompt adherence if no API
             key_terms_score = key_terms_score
             reading_score = reading_score
             video_score = video_score
@@ -698,18 +811,20 @@ def grade_submission_with_retries(
             "video_score": video_score
         }
     else:  # 16-point (4 categories)
-        total_score = prompt_score + key_terms_score + reading_score + video_score
+        total_score = prompt_score + key_terms_score + reading_score + video_score + engagement_score
         local_scores = {
             "prompt_score": prompt_score,
             "key_terms_score": key_terms_score,
             "reading_score": reading_score,
-            "video_score": video_score
+            "video_score": video_score,
+            "engagement_score": engagement_score
         }
 
     # Prepare feedback
     local_feedback = {
         "reading_feedback": reading_feedback,
-        "key_terms_fallback": key_terms_feedback
+        "key_terms_fallback": key_terms_feedback,
+        "engagement_feedback": engagement_feedback
     }
 
     # Generate final feedback
@@ -727,7 +842,12 @@ def grade_submission_with_retries(
         "total_score": total_score,
         "final_feedback": final_feedback,
         "improvement_areas": improvement_areas,
-        "detected_terms": detected_terms
+        "detected_terms": detected_terms,
+        "prompt_score": prompt_score if grading_scale == "16-point (4 categories)" else prompt_key_score,
+        "key_terms_score": key_terms_score if grading_scale == "16-point (4 categories)" else 0,
+        "reading_score": reading_score,
+        "video_score": video_score,
+        "engagement_score": engagement_score if grading_scale == "16-point (4 categories)" else 0
     }
 
 # ============================================
@@ -854,10 +974,11 @@ else:
     <div class="scale-info">
     <h4>16-Point Scale (4 Categories)</h4>
     <ul>
-        <li>Prompt Adherence (4.0 points)</li>
-        <li>Key Terms Usage (4.0 points)</li>
+        <li>Prompt Adherence (2.0 points)</li>
+        <li>Key Terms Usage (2.0 points)</li>
         <li>Reading Reference (4.0 points)</li>
         <li>Video Reference (4.0 points)</li>
+        <li>Discussion Engagement (4.0 points)</li>
     </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -936,6 +1057,9 @@ if csv_file and docx_file:
                         st.error("No data found in CSV file. Please check the file format.")
                         st.stop()
                     
+                    # Store original columns
+                    original_columns = list(rows[0].keys()) if rows else []
+                    
                     # Display extracted information
                     progress_bar.progress(0.5)
                     st.text("Analyzing submissions...")
@@ -966,14 +1090,10 @@ if csv_file and docx_file:
                             grading_scale
                         )
                         
-                        # Add to results
-                        results.append({
-                            'Name': student_name,
-                            'Total Score': grade_result['total_score'],
-                            'Feedback': grade_result['final_feedback'],
-                            'Improvement Areas': ', '.join(grade_result['improvement_areas']) if grade_result['improvement_areas'] else 'None',
-                            'Key Terms Used': ', '.join(grade_result['detected_terms']) if grade_result['detected_terms'] else 'None'
-                        })
+                        # Add to results - preserving all original columns
+                        result_row = row.copy()
+                        result_row.update(grade_result)
+                        results.append(result_row)
                         
                         # Update progress
                         progress = (i + 1) / total_students
@@ -991,21 +1111,21 @@ if csv_file and docx_file:
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        avg_score = df['Total Score'].mean()
+                        avg_score = df['total_score'].mean()
                         st.metric("Average Score", f"{avg_score:.2f}")
                     
                     with col2:
-                        median_score = df['Total Score'].median()
+                        median_score = df['total_score'].median()
                         st.metric("Median Score", f"{median_score:.2f}")
                     
                     with col3:
-                        min_score = df['Total Score'].min()
-                        max_score = df['Total Score'].max()
+                        min_score = df['total_score'].min()
+                        max_score = df['total_score'].max()
                         st.metric("Score Range", f"{min_score:.1f} - {max_score:.1f}")
                     
                     # Show score distribution
                     st.markdown("### 📈 Score Distribution")
-                    fig = px.histogram(df, x="Total Score", nbins=20, title="Distribution of Scores")
+                    fig = px.histogram(df, x="total_score", nbins=20, title="Distribution of Scores")
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # Show detailed results
