@@ -496,14 +496,14 @@ def construct_final_feedback(
         scaled_video_score = round_nearest_half(local_scores['video_score'] * 1.25)  # Scale from 4.0 to 5.0
         scaled_reading_score = round_nearest_half(local_scores['reading_score'] * 1.25)  # Scale from 4.0 to 5.0
         
-        prompt_key_formatted = f"PROMPT AND KEY TERMS [{scaled_prompt_score + scaled_key_terms_score:.1f}/5.0]: {prompt_key_combined_feedback}."
-        video_formatted = f"REFERENCE TO VIDEO [{scaled_video_score:.1f}]: {video_feedback}."
-        reading_formatted = f"REFERENCE TO READING [{scaled_reading_score:.1f}]: {reading_feedback}."
+        prompt_key_formatted = f"PROMPT AND KEY TERMS [{scaled_prompt_score + scaled_key_terms_score:.1f}/5.0]: {prompt_key_combined_feedback}"
+        video_formatted = f"REFERENCE TO VIDEO [{scaled_video_score:.1f}]: {video_feedback}"
+        reading_formatted = f"REFERENCE TO READING [{scaled_reading_score:.1f}]: {reading_feedback}"
     else:  # 16-point (4 categories)
-        prompt_key_formatted = f"PROMPT AND KEY TERMS [{combined_prompt_key_score:.1f}]: {prompt_key_combined_feedback}."
-        video_formatted = f"REFERENCE TO VIDEO [{local_scores['video_score']:.1f}]: {video_feedback}."
-        reading_formatted = f"REFERENCE TO READING [{local_scores['reading_score']:.1f}]: {reading_feedback}."
-        engagement_formatted = f"DISCUSSION ENGAGEMENT [{local_scores['engagement_score']:.1f}]: {engagement_feedback}."
+        prompt_key_formatted = f"PROMPT AND KEY TERMS [{combined_prompt_key_score:.1f}]: {prompt_key_combined_feedback}"
+        video_formatted = f"REFERENCE TO VIDEO [{local_scores['video_score']:.1f}]: {video_feedback}"
+        reading_formatted = f"REFERENCE TO READING [{local_scores['reading_score']:.1f}]: {reading_feedback}"
+        engagement_formatted = f"DISCUSSION ENGAGEMENT [{local_scores['engagement_score']:.1f}]: {engagement_feedback}"
 
     if improvement_areas:
         # Remove "Discussion Engagement" from improvement areas for 15-point scale
@@ -614,11 +614,36 @@ def grade_submission_with_retries(
         reading_info['author_last_name'] = ""
 
     if page_numbers:
-        # Format page range for feedback
+        # Format page range for feedback - fix for issue 1
         if len(page_numbers) == 1:
-            reading_info['page_range_expected'] = f"page {page_numbers[0]}"
+            page_num = page_numbers[0]
+            if page_num.is_integer():
+                reading_info['page_range_expected'] = f"page {int(page_num)}"
+            else:
+                reading_info['page_range_expected'] = f"page {page_num}"
         else:
-            reading_info['page_range_expected'] = f"pages {', '.join(map(str, page_numbers))}"
+            # Check if it's a range (consecutive numbers)
+            is_range = False
+            if len(page_numbers) == 2 and page_numbers[1] > page_numbers[0]:
+                diff = page_numbers[1] - page_numbers[0]
+                if diff <= 10:  # Assume it's a range if difference is small
+                    is_range = True
+            
+            if is_range:
+                # Use hyphen for ranges
+                if page_numbers[0].is_integer() and page_numbers[1].is_integer():
+                    reading_info['page_range_expected'] = f"pages {int(page_numbers[0])}-{int(page_numbers[1])}"
+                else:
+                    reading_info['page_range_expected'] = f"pages {page_numbers[0]}-{page_numbers[1]}"
+            else:
+                # Use comma for non-consecutive pages
+                formatted_pages = []
+                for p in page_numbers:
+                    if p.is_integer():
+                        formatted_pages.append(str(int(p)))
+                    else:
+                        formatted_pages.append(str(p))
+                reading_info['page_range_expected'] = f"pages {', '.join(formatted_pages)}"
     else:
         reading_info['page_range_expected'] = "unspecified pages"
 
@@ -697,21 +722,23 @@ def grade_submission_with_retries(
 
     # --- GENERATE READING FEEDBACK BASED ON SCORE ---
     if max_reading_score == 4.0:
-        reading_feedback_local = f"You successfully integrated concepts from the reading and provided a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}), earning full credit for this section."
+        reading_feedback_local = f"You successfully integrated concepts from the reading and provided a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}), earning full credit for this section"
     elif max_reading_score == 3.5:
         if detected_author:
-            reading_feedback_local = f"You referenced page number(s) {', '.join(detected_pages)} from the assigned reading, but cited '{detected_author}' instead of the correct author '{assigned_author}'. Partial credit awarded for the correct page reference. Ensure you reference the correct author to earn full credit."
+            # Fix for issue 2 - don't mention the specific wrong author
+            reading_feedback_local = f"You referenced page number(s) from the assigned reading, but cited the wrong author. Be sure to include the correct author to earn full credit"
         else:
-            reading_feedback_local = f"A page number from the assigned reading was detected, but the author was not mentioned. Include both the author and page number for full credit."
+            reading_feedback_local = f"A page number from the assigned reading was detected, but the author was not mentioned. Include both the author and page number for full credit"
     elif max_reading_score == 3.0:
-        reading_feedback_local = f"You mentioned the author ({assigned_author}), demonstrating engagement with the reading. However, you did not provide a specific page number from the assigned reading ({reading_info['page_range_expected']}) as required for higher credit. Include specific page references to earn full credit."
+        reading_feedback_local = f"You mentioned the author ({assigned_author}), demonstrating engagement with the reading. However, you did not provide a specific page number from the assigned reading ({reading_info['page_range_expected']}) as required for higher credit. Include specific page references to earn full credit"
     elif max_reading_score == 2.5:
-        reading_feedback_local = f"You referenced '{detected_author}' in your submission, but this does not match the assigned author '{assigned_author}'. Ensure you reference the correct author and include a page number to earn more credit."
+        # Fix for issue 2 - don't mention the specific wrong author
+        reading_feedback_local = f"You referenced the wrong author in your submission. Be sure to include the correct author and include a page number to earn more credit"
     else:  # 2.0
         if assigned_author:
-            reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}) as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score."
+            reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}) as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score"
         else:
-            reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score."
+            reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score"
 
     # ----------------------------------------------------
 
