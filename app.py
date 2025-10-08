@@ -804,13 +804,14 @@ SUBMISSION TEXT:
     total = sum(local_scores.values())
     total_score = round_nearest_half(total)
 
+    # FIX: Keep scores as numeric values, not strings
     final_grades = {
-        "prompt_score": str(local_scores['prompt_score']),
-        "key_terms_score": str(local_scores['key_terms_score']),
-        "video_score": str(local_scores['video_score']),
-        "reading_score": str(local_scores['reading_score']),
-        "engagement_score": str(local_scores['engagement_score']),
-        "total_score": str(total_score),
+        "prompt_score": local_scores['prompt_score'],
+        "key_terms_score": local_scores['key_terms_score'],
+        "video_score": local_scores['video_score'],
+        "reading_score": local_scores['reading_score'],
+        "engagement_score": local_scores['engagement_score'],
+        "total_score": total_score,
     }
 
     final_grades["feedback"] = construct_final_feedback(api_results, local_scores, local_feedback, improvement_areas, student_first_name, grading_scale)
@@ -866,10 +867,26 @@ st.markdown("""
     .download-button {
         color: black !important;
     }
+    /* Fix for the dropdown menu text color */
     .stSelectbox > div > div > div {
         color: black !important;
     }
+    .stSelectbox > div > div > div > div {
+        color: black !important;
+    }
+    .stSelectbox label {
+        color: black !important;
+    }
     .stSidebar .stSelectbox {
+        color: black !important;
+    }
+    .stSidebar .stSelectbox > div > div > div {
+        color: black !important;
+    }
+    .stSidebar .stSelectbox > div > div > div > div {
+        color: black !important;
+    }
+    .stSidebar .stSelectbox label {
         color: black !important;
     }
 </style>
