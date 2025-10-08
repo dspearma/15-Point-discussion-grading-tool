@@ -11,6 +11,10 @@ import time
 import math
 from typing import Dict, Any, List, Union
 from difflib import SequenceMatcher
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ============================================
 # ALL FUNCTION DEFINITIONS GO HERE
@@ -863,7 +867,25 @@ st.markdown("Upload your CSV and DOCX files to grade student discussions.")
 
 # Sidebar for configuration
 st.sidebar.header("Configuration")
-api_key = st.sidebar.text_input("OpenRouter API Key", type="password")
+
+# Try to get API key from Streamlit secrets first, then from environment variable, then from user input
+try:
+    api_key = st.secrets["OPENROUTER_API_KEY"]
+    st.sidebar.success("API key loaded from Streamlit secrets")
+    api_key_input = st.sidebar.text_input("OpenRouter API Key", type="password", value="•••••••••••••••••••••••••••••••••", disabled=True)
+except (KeyError, FileNotFoundError):
+    # Fallback to environment variable
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if api_key:
+        st.sidebar.success("API key loaded from environment variable")
+        api_key_input = st.sidebar.text_input("OpenRouter API Key", type="password", value="•••••••••••••••••••••••••••••••••", disabled=True)
+    else:
+        st.sidebar.warning("No API key found in environment variable")
+        api_key_input = st.sidebar.text_input("OpenRouter API Key", type="password")
+
+# Use the API key from the available source
+api_key = api_key if api_key else api_key_input
+
 st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)")
 
 # Add grading scale selector
