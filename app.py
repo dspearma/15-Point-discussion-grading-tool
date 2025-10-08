@@ -489,9 +489,14 @@ def construct_final_feedback(
     
     # Format scores based on grading scale
     if grading_scale == "15-point (3 categories)":
-        prompt_key_formatted = f"PROMPT AND KEY TERMS [{combined_prompt_key_score:.1f}/5.0]: {prompt_key_combined_feedback}."
-        video_formatted = f"REFERENCE TO VIDEO [{local_scores['video_score']:.1f}]: {video_feedback}."
-        reading_formatted = f"REFERENCE TO READING [{local_scores['reading_score']:.1f}]: {reading_feedback}."
+        # Scale up the scores for 15-point scale (5 points per category)
+        scaled_prompt_key_score = combined_prompt_key_score * 1.25  # Scale from 4.0 to 5.0
+        scaled_video_score = local_scores['video_score'] * 1.25  # Scale from 4.0 to 5.0
+        scaled_reading_score = local_scores['reading_score'] * 1.25  # Scale from 4.0 to 5.0
+        
+        prompt_key_formatted = f"PROMPT AND KEY TERMS [{scaled_prompt_key_score:.1f}/5.0]: {prompt_key_combined_feedback}."
+        video_formatted = f"REFERENCE TO VIDEO [{scaled_video_score:.1f}]: {video_feedback}."
+        reading_formatted = f"REFERENCE TO READING [{scaled_reading_score:.1f}]: {reading_feedback}."
     else:  # 16-point (4 categories)
         prompt_key_formatted = f"PROMPT AND KEY TERMS [{combined_prompt_key_score:.1f}]: {prompt_key_combined_feedback}."
         video_formatted = f"REFERENCE TO VIDEO [{local_scores['video_score']:.1f}]: {video_feedback}."
@@ -804,15 +809,33 @@ SUBMISSION TEXT:
     total = sum(local_scores.values())
     total_score = round_nearest_half(total)
 
-    # FIX: Keep scores as numeric values, not strings
-    final_grades = {
-        "prompt_score": local_scores['prompt_score'],
-        "key_terms_score": local_scores['key_terms_score'],
-        "video_score": local_scores['video_score'],
-        "reading_score": local_scores['reading_score'],
-        "engagement_score": local_scores['engagement_score'],
-        "total_score": total_score,
-    }
+    # Scale scores for 15-point system
+    if grading_scale == "15-point (3 categories)":
+        # Scale up the scores for 15-point scale (5 points per category)
+        scaled_prompt_key_score = (local_scores['prompt_score'] + local_scores['key_terms_score']) * 1.25  # Scale from 4.0 to 5.0
+        scaled_video_score = local_scores['video_score'] * 1.25  # Scale from 4.0 to 5.0
+        scaled_reading_score = local_scores['reading_score'] * 1.25  # Scale from 4.0 to 5.0
+        scaled_total = scaled_prompt_key_score + scaled_video_score + scaled_reading_score
+        
+        # FIX: Keep scores as numeric values, not strings
+        final_grades = {
+            "prompt_score": local_scores['prompt_score'],
+            "key_terms_score": local_scores['key_terms_score'],
+            "video_score": scaled_video_score,  # Use scaled value
+            "reading_score": scaled_reading_score,  # Use scaled value
+            "engagement_score": local_scores['engagement_score'],
+            "total_score": scaled_total,  # Use scaled total
+        }
+    else:
+        # FIX: Keep scores as numeric values, not strings
+        final_grades = {
+            "prompt_score": local_scores['prompt_score'],
+            "key_terms_score": local_scores['key_terms_score'],
+            "video_score": local_scores['video_score'],
+            "reading_score": local_scores['reading_score'],
+            "engagement_score": local_scores['engagement_score'],
+            "total_score": total_score,
+        }
 
     final_grades["feedback"] = construct_final_feedback(api_results, local_scores, local_feedback, improvement_areas, student_first_name, grading_scale)
 
@@ -877,6 +900,18 @@ st.markdown("""
     .stSelectbox label {
         color: black !important;
     }
+    .stSelectbox > label > div {
+        color: black !important;
+    }
+    .stSelectbox > label > div > div {
+        color: black !important;
+    }
+    .stSelectbox > label > div > div > div {
+        color: black !important;
+    }
+    .stSelectbox > label > div > div > div > div {
+        color: black !important;
+    }
     .stSidebar .stSelectbox {
         color: black !important;
     }
@@ -887,6 +922,46 @@ st.markdown("""
         color: black !important;
     }
     .stSidebar .stSelectbox label {
+        color: black !important;
+    }
+    .stSidebar .stSelectbox > label > div {
+        color: black !important;
+    }
+    .stSidebar .stSelectbox > label > div > div {
+        color: black !important;
+    }
+    .stSidebar .stSelectbox > label > div > div > div {
+        color: black !important;
+    }
+    .stSidebar .stSelectbox > label > div > div > div > div {
+        color: black !important;
+    }
+    /* Additional CSS to ensure dropdown options are visible */
+    div[data-baseweb="select"] {
+        color: black !important;
+    }
+    div[data-baseweb="select"] > div {
+        color: black !important;
+    }
+    div[data-baseweb="select"] > div > div {
+        color: black !important;
+    }
+    div[data-baseweb="select"] > div > div > div {
+        color: black !important;
+    }
+    div[data-baseweb="select"] > div > div > div > div {
+        color: black !important;
+    }
+    div[data-baseweb="select"] div[role="listbox"] {
+        color: black !important;
+    }
+    div[data-baseweb="select"] div[role="listbox"] > div {
+        color: black !important;
+    }
+    div[data-baseweb="select"] div[role="listbox"] > div > div {
+        color: black !important;
+    }
+    div[data-baseweb="select"] div[role="listbox"] > div > div > div {
         color: black !important;
     }
 </style>
