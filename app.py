@@ -35,18 +35,18 @@ def validate_api_key(api_key: str) -> bool:
         return False
     return api_key.startswith("sk-or-v1-") and len(api_key) > 20
 
-def test_api_key(api_key: str):
-    """Test if the API key is valid by making a simple API call."""
+def test_api_key_direct(api_key: str):
+    """Test if the API key is valid by making a simple API call with minimal parameters."""
     if not api_key or not validate_api_key(api_key):
         return False, "Invalid API key format"
     
     try:
         api_url = "https://openrouter.ai/api/v1/chat/completions"
+        
+        # Use the simplest possible request
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://your-app-url.com",
-            "X-Title": "Discussion Grading Tool"
+            "Content-Type": "application/json"
         }
         
         payload = {
@@ -54,45 +54,37 @@ def test_api_key(api_key: str):
             "messages": [
                 {
                     "role": "user",
-                    "content": "Say 'API key is working' if you receive this message."
+                    "content": "Say 'API key is working'"
                 }
             ],
-            "max_tokens": 50
+            "max_tokens": 10
         }
         
         # Log the request details for debugging
-        logger.info(f"Making API call to: {api_url}")
-        logger.info(f"Request headers: {headers}")
+        logger.info(f"Making direct API call to: {api_url}")
+        logger.info(f"API key format: {api_key[:10]}...{api_key[-10:]}")
         
         response = requests.post(api_url, headers=headers, json=payload, timeout=30)
         
         logger.info(f"Response status code: {response.status_code}")
-        logger.info(f"Response headers: {response.headers}")
         
         if response.status_code == 200:
             result = response.json()
-            logger.info(f"Response body: {result}")
-            
             if result.get("choices") and len(result["choices"]) > 0:
                 content = result["choices"][0]["message"]["content"]
-                if "API key is working" in content:
-                    return True, "API key is valid"
-                else:
-                    return True, f"API key is valid but unexpected response: {content[:50]}..."
+                return True, f"API key is working. Response: {content}"
             else:
                 return False, "Invalid response format"
         else:
             # Log the response text for debugging
             logger.error(f"API call failed with status {response.status_code}")
+            logger.error(f"Response headers: {response.headers}")
             logger.error(f"Response body: {response.text}")
-            return False, f"API call failed with status {response.status_code}"
+            return False, f"API call failed with status {response.status_code}. Response: {response.text[:200]}"
             
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Network error occurred: {str(e)}")
-        return False, "Network error occurred while testing API key"
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        return False, "An error occurred while testing API key"
+        logger.error(f"Error in direct API test: {str(e)}")
+        return False, f"Error testing API key: {str(e)}"
 
 def strip_tags(text: str) -> str:
     """Removes HTML tags from a string."""
@@ -169,23 +161,19 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
         # Create a new headers dictionary to avoid any potential issues
         new_headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://your-app-url.com",
-            "X-Title": "Discussion Grading Tool"
+            "Content-Type": "application/json"
         }
         
         # Debug: Log the first and last few characters of the API key (without exposing the full key)
         masked_key = f"{api_key[:10]}...{api_key[-10:]}"
         logger.info(f"Using API key: {masked_key}")
         logger.info(f"Request URL: {api_url}")
-        logger.info(f"Request headers: {new_headers}")
         
         # Make the API call
         response = requests.post(api_url, headers=new_headers, json=payload, timeout=timeout)
         
         # Debug: Log response status
         logger.info(f"Response status: {response.status_code}")
-        logger.info(f"Response headers: {response.headers}")
         
         # Handle specific HTTP errors
         if response.status_code == 401:
@@ -906,7 +894,7 @@ st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)"
 if api_key and validate_api_key(api_key):
     if st.sidebar.button("Test API Key"):
         with st.spinner("Testing API key..."):
-            is_valid, message = test_api_key(api_key)
+            is_valid, message = test_api_key_direct(api_key)
             if is_valid:
                 st.success(message)
             else:
