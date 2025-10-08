@@ -44,7 +44,9 @@ def test_api_key(api_key: str):
         api_url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://your-app-url.com",
+            "X-Title": "Discussion Grading Tool"
         }
         
         payload = {
@@ -58,10 +60,19 @@ def test_api_key(api_key: str):
             "max_tokens": 50
         }
         
+        # Log the request details for debugging
+        logger.info(f"Making API call to: {api_url}")
+        logger.info(f"Request headers: {headers}")
+        
         response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+        
+        logger.info(f"Response status code: {response.status_code}")
+        logger.info(f"Response headers: {response.headers}")
         
         if response.status_code == 200:
             result = response.json()
+            logger.info(f"Response body: {result}")
+            
             if result.get("choices") and len(result["choices"]) > 0:
                 content = result["choices"][0]["message"]["content"]
                 if "API key is working" in content:
@@ -71,14 +82,16 @@ def test_api_key(api_key: str):
             else:
                 return False, "Invalid response format"
         else:
-            # Don't expose the full response text to avoid potential data leaks
+            # Log the response text for debugging
+            logger.error(f"API call failed with status {response.status_code}")
+            logger.error(f"Response body: {response.text}")
             return False, f"API call failed with status {response.status_code}"
             
     except requests.exceptions.RequestException as e:
-        # Don't expose the full exception to avoid potential data leaks
+        logger.error(f"Network error occurred: {str(e)}")
         return False, "Network error occurred while testing API key"
     except Exception as e:
-        # Don't expose the full exception to avoid potential data leaks
+        logger.error(f"Unexpected error: {str(e)}")
         return False, "An error occurred while testing API key"
 
 def strip_tags(text: str) -> str:
@@ -156,22 +169,27 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
         # Create a new headers dictionary to avoid any potential issues
         new_headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://your-app-url.com",
+            "X-Title": "Discussion Grading Tool"
         }
         
         # Debug: Log the first and last few characters of the API key (without exposing the full key)
         masked_key = f"{api_key[:10]}...{api_key[-10:]}"
         logger.info(f"Using API key: {masked_key}")
         logger.info(f"Request URL: {api_url}")
+        logger.info(f"Request headers: {new_headers}")
         
         # Make the API call
         response = requests.post(api_url, headers=new_headers, json=payload, timeout=timeout)
         
         # Debug: Log response status
         logger.info(f"Response status: {response.status_code}")
+        logger.info(f"Response headers: {response.headers}")
         
         # Handle specific HTTP errors
         if response.status_code == 401:
+            logger.error(f"Authentication failed. Response: {response.text}")
             raise ValueError("Authentication failed. Please check your API key.")
         elif response.status_code == 429:
             raise ValueError("Rate limit exceeded. Please try again later.")
