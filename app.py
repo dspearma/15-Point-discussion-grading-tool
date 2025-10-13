@@ -1556,10 +1556,7 @@ else:
         st.sidebar.error(
             "Invalid API key format. OpenRouter API keys should start with 'sk-or-v1-' and be at least 20 characters long."
         )
-
 else:
-    st.sidebar.error("No API key provided. Please enter your API key to continue.")
-
 st.sidebar.markdown(
     "Get your API key from [OpenRouter](https://openrouter.ai/)"
 )
