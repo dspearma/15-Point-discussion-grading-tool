@@ -425,45 +425,6 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
         'highest_quality_score': highest_quality_score
     }
 
-def analyze_video_reference_locally(submission_text: str, video_text: str) -> Dict[str, Any]:
-    """Analyzes the submission for references to the video material using local rules."""
-    score = 2.0
-    feedback = "You successfully integrated concepts from the video, but you did not provide a specific citation as required for higher credit. You must include the author/creator and a timestamp to earn more than the minimum score."
-
-    creator_name = ""
-    creator_match = re.search(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', video_text)
-    if creator_match:
-        creator_name = creator_match.group(1).strip()
-
-    creator_ts_pattern = re.compile(r'\(\s*' + re.escape(creator_name.split()[0]) + r'\s*,\s*\d{1,2}:\d{2}\s*\)|' + re.escape(creator_name) + r'\s*\(\s*\d{1,2}:\d{2}\s*\)', re.IGNORECASE) if creator_name else None
-    timestamp_pattern = re.compile(r'\b\d{1,2}:\d{2}\b')
-    creator_pattern = re.compile(r'\b' + re.escape(creator_name) + r'\b', re.IGNORECASE) if creator_name else None
-    video_keyword_pattern = re.compile(r'\b(video|youtube|film)\b', re.IGNORECASE)
-
-    has_creator_and_ts = creator_ts_pattern and creator_ts_pattern.search(submission_text)
-    has_timestamp = timestamp_pattern.search(submission_text)
-    has_creator = creator_pattern and creator_pattern.search(submission_text)
-    has_video_keyword = video_keyword_pattern.search(submission_text)
-
-    if has_creator_and_ts:
-        score = 4.0
-        feedback = f"Excellent! You specifically referenced '{creator_name}' and included timestamps, demonstrating strong engagement with the video content. Full credit awarded."
-    elif has_creator and has_timestamp:
-        score = 4.0
-        feedback = f"Excellent! You specifically referenced '{creator_name}' and included timestamps, demonstrating strong engagement with the video content. Full credit awarded."
-    elif has_creator:
-        score = 3.5
-        feedback = f"Good reference. You mentioned the video's creator, '{creator_name}'. To earn full credit, also include specific timestamps to support your points."
-    elif has_timestamp:
-        score = 3.0
-        feedback = "You included a timestamp, which is great for specificity. To improve, also mention the creator's name to make the citation complete."
-    elif has_video_keyword:
-        score = 2.5
-        feedback = "You mentioned the 'video', but to earn higher credit, you need to provide more specific references, such as the creator's name or timestamps from the video."
-
-    return {'score': score, 'feedback': feedback}
-
-
 def construct_final_feedback(
     llm_results: Dict,
     local_scores: Dict[str, float],
@@ -475,8 +436,8 @@ def construct_final_feedback(
     combined_prompt_key_score = local_scores['prompt_score'] + local_scores['key_terms_score']
     prompt_feedback = llm_results.get('prompt_feedback', 'Feedback missing for prompt quality.')
     key_terms_feedback = llm_results.get('key_terms_feedback', local_feedback.get('key_terms_fallback', 'Feedback missing for key terms.'))
-    reading_feedback = local_feedback.get('reading_feedback', llm_results.get('reading_feedback', 'Feedback missing for reading reference.'))
-    video_feedback = local_feedback.get('video_feedback', 'Feedback missing for video reference.') 
+    reading_feedback = local_feedback.get('reading_feedback', 'Feedback missing for reading reference.')
+    video_feedback = llm_results.get('video_feedback', 'Feedback missing for video reference.') 
     general_feedback_llm = llm_results.get('general_feedback', 'Overall submission quality was strong.')
 
     engagement_feedback = local_feedback['engagement_feedback']
@@ -566,55 +527,48 @@ def grade_submission_with_retries(
 
     # 1. Local Scoring & Data Preparation
     engagement_analysis = analyze_engagement_quality(replies)
-    video_analysis = analyze_video_reference_locally(submission_text, video_text)
     engagement_score = engagement_analysis['score']
     detected_terms = detect_key_terms_presence(submission_text, key_terms)
     detected_terms_str = ', '.join(detected_terms) if detected_terms else 'none detected'
     reading_info = {}
 
     # --- UPDATED READING INFO EXTRACTION ---
-    author_match = re.search(r'READING:\s*([A-Za-z]+)', reading_text)
-    assigned_author = author_match.group(1).strip() if author_match else ""
+    author_match = re.search(r'READING:\s*([A-Za-z\s]+)', reading_text)
+    assigned_author = author_match.group(1).split(',')[0].strip() if author_match else ""
 
     page_numbers = []
     pages_match = re.search(r'pages?\s+([\d.,\s\-and]+)', reading_text, re.IGNORECASE)
     if pages_match:
         page_str = pages_match.group(1)
-        page_numbers = [float(p) for p in re.findall(r'[\d\.]+', page_str)]
+        page_numbers = [p.strip() for p in re.findall(r'[\d\.]+', page_str)]
     
     reading_info['author_last_name'] = assigned_author
     if page_numbers:
-        page_numbers.sort()
-        if len(page_numbers) == 1:
-            reading_info['page_range_expected'] = f"page {page_numbers[0]}"
-        else:
-            # Format as a list for clarity, e.g., "pages 4.1, 4.2, 4.3"
-            reading_info['page_range_expected'] = f"pages {', '.join(map(str, page_numbers))}"
+        reading_info['page_range_expected'] = f"pages {', '.join(page_numbers)}"
     else:
         reading_info['page_range_expected'] = "unspecified pages"
-    # --- END UPDATED READING INFO ---
     
+    # --- UPDATED CITATION ANALYSIS ---
     highest_max_reading_score = 2.0
-    best_citation_status_msg = f"NO CLEAR REFERENCE to the assigned reading ('{assigned_author}') was detected. Minimum score applies."
+    best_citation_status_msg = f"No clear reference to the assigned reading ('{assigned_author}') was detected. Minimum score applies."
     detected_author = ""
-
-    if reading_info['author_last_name']:
-        assigned_author_lower = reading_info['author_last_name'].lower()
-        author_present = re.search(r'\b' + re.escape(assigned_author_lower) + r'\b', submission_text.lower())
+    author_present = False
+    page_present = False
+    
+    if assigned_author:
+        assigned_author_lower = assigned_author.lower()
         
-        page_present = False
-        detected_pages = []
+        if re.search(r'\b' + re.escape(assigned_author_lower) + r'\b', submission_text.lower()):
+            author_present = True
+        
         if page_numbers:
             for page in page_numbers:
-                page_str = str(page)
-                # Check for patterns like (..., 4.2) or page 4.2
-                if re.search(r'[\(\s,]\s*p(?:g|age)?\.?\s*' + re.escape(page_str) + r'\b', submission_text, re.IGNORECASE):
+                if re.search(r'[\(\s,]\s*p(?:g|age)?\.?\s*' + re.escape(page) + r'\b', submission_text, re.IGNORECASE):
                     page_present = True
-                    detected_pages.append(page_str)
+                    break # Found one valid page, that's enough
         
-        # Look for a different cited author, e.g. (Florida State College..., page 4.2)
         if not author_present:
-            citation_match = re.search(r'\(([^,)]+),[^)]*p(?:g|age)?\.?\s*[\d\.]+', submission_text)
+            citation_match = re.search(r'\(([^,)]+),[^)]*p(?:g|age)?\.?\s*[\d\.]+\)', submission_text, re.IGNORECASE)
             if citation_match:
                 potential_author = citation_match.group(1).strip()
                 if potential_author.lower() != assigned_author_lower:
@@ -647,43 +601,41 @@ def grade_submission_with_retries(
     elif max_reading_score == 3.5:
         if detected_author:
             reading_feedback_local = f"You cited a specific page number from the reading, which is great. However, you cited '{detected_author}' instead of the assigned source, '{assigned_author}'. To earn full credit, please ensure you use the correct source. The required format is (Author, page #)."
-        else: # Page present, author missing
+        else:
             reading_feedback_local = f"You included a specific page number from the assigned reading, but the author was not mentioned. To earn full credit, please include the author ('{assigned_author}'). The required format is (Author, page #)."
     elif max_reading_score == 3.0:
         reading_feedback_local = f"You correctly identified the author ('{assigned_author}'), but did not include a specific page number from the assigned reading ({reading_info['page_range_expected']}). To earn full credit, you must include a page number. The required format is (Author, page #)."
     elif max_reading_score == 2.5:
         reading_feedback_local = f"You referenced '{detected_author}', but this is not the assigned source ('{assigned_author}') and no page number was included. Please be sure to cite the correct source material with a page number to earn more credit. The required format is (Author, page #)."
     else: # 2.0
-        reading_feedback_local = f"No specific citation from the assigned reading ('{assigned_author}', {reading_info['page_range_expected']}) was detected. To earn more than the minimum score, you must include a citation in the format (Author, page #)."
-    # --- END UPDATED FEEDBACK ---
+        reading_feedback_local = f"While you may have referred to the reading's concepts, your submission should include a specific citation to receive more than the minimum score. Please be sure to cite the assigned source ('{assigned_author}') with a page number in the format (Author, page #)."
 
     local_scores = {
         'engagement_score': engagement_score,
         'prompt_score': 0.0,
         'reading_score': max_reading_score,
         'key_terms_score': 0.0,
-        'video_score': video_analysis['score']
+        'video_score': 0.0 # Will be set by LLM
     }
     local_feedback = {
         'engagement_feedback': engagement_analysis['feedback'],
         'reading_feedback': reading_feedback_local,
-        'video_feedback': video_analysis['feedback'],
         'key_terms_fallback': f"LLM failed to provide key terms feedback. Detected terms: {detected_terms_str}"
     }
 
     llm_scoring_criteria = f"""
-SCORING Guidelines for LLM (4 points total - Reading & Video are scored separately):
+SCORING Guidelines for LLM (6 points total - Reading is scored separately):
 1. PROMPT ADHERENCE (Minimum 1.0 - 2.0): How well does the student address the entire prompt? (2.0 Maximum)
 2. READING REFERENCE: **This section is scored separately by the system as {max_reading_score:.1f}. Do not provide a reading_score.**
    - Citation Status (for context): {best_citation_status_msg}
-3. VIDEO REFERENCE: **This section is scored separately by the system as {video_analysis['score']:.1f}. Do not provide a video_score.**
+3. VIDEO REFERENCE (Minimum 2.0 - 4.0): How well does the student use concepts from the video to support their points? Grade on the quality of application and demonstration of understanding. A specific citation (creator name or timestamp) is a positive indicator of strong engagement but is not required for a high score if the understanding is clearly demonstrated.
 4. KEY TERMS USAGE (Minimum 1.0 - 2.0): Did the student use at least one key term (from the detected list) in a way that demonstrates contextual understanding? (2.0 Maximum)
    - FULL CREDIT (2.0) MUST BE AWARDED if ONE or more terms are used meaningfully.
 
 Detected Key Terms to review for usage: "{detected_terms_str}"
 """
 
-    prompt_for_llm = f"""Grade this student discussion submission based ONLY on the following criteria. Reading Reference ({max_reading_score:.1f}), Video Reference ({video_analysis['score']:.1f}), and Engagement ({engagement_score}) are scored separately by the system.
+    prompt_for_llm = f"""Grade this student discussion submission based ONLY on the following criteria. Reading Reference ({max_reading_score:.1f}) and Engagement ({engagement_score}) are scored separately by the system.
 
 STUDENT: {student_first_name}
 
@@ -695,14 +647,16 @@ Video: {video_text[:200]}...
 {llm_scoring_criteria}
 
 IMPORTANT: Provide SPECIFIC and ENCOURAGING feedback in the second person ("You", "Your").
-**DO NOT include "reading_score" or "video_score" in your JSON response - they are handled separately.**
+**DO NOT include "reading_score" in your JSON response - it is handled separately.**
 
 Respond with ONLY valid JSON. Omit any markdown fences (```json). Use floating point numbers rounded to the nearest 0.5.
 
 {{
   "prompt_score": "2.0",
+  "video_score": "4.0",
   "key_terms_score": "2.0",
   "prompt_feedback": "You successfully articulated how involuntary servitude was preserved and connected this theme to present-day issues.",
+  "video_feedback": "You clearly referenced the video context regarding convict leasing and the continuation of forced labor, demonstrating a strong grasp of the material.",
   "key_terms_feedback": "Your contextual usage of key terms earns full credit, demonstrating clear understanding of the material.",
   "general_feedback": "Your arguments were well-structured and demonstrated impressive critical thinking."
 }}
@@ -744,9 +698,11 @@ SUBMISSION TEXT:
 
     try:
         local_scores['prompt_score'] = round_nearest_half(max(1.0, min(2.0, float(api_results.get("prompt_score", 1.0)))))
+        local_scores['video_score'] = round_nearest_half(max(2.0, min(4.0, float(api_results.get("video_score", 2.0)))))
         local_scores['key_terms_score'] = round_nearest_half(max(1.0, min(2.0, float(api_results.get("key_terms_score", 1.0)))))
     except (ValueError, TypeError):
         local_scores['prompt_score'] = 1.0
+        local_scores['video_score'] = 2.0
         local_scores['key_terms_score'] = 1.0
 
     if grading_scale == "15-point (3 categories)":
@@ -846,98 +802,21 @@ st.markdown("""
     .download-button {
         color: black !important;
     }
-    /* Fix for the dropdown menu text color - ALL WHITE */
-    .stSelectbox > div > div > div {
-        color: white !important;
-    }
-    .stSelectbox > div > div > div > div {
-        color: white !important;
-    }
-    .stSelectbox label {
-        color: white !important;
-    }
-    .stSelectbox > label > div {
-        color: white !important;
-    }
-    .stSelectbox > label > div > div {
-        color: white !important;
-    }
-    .stSelectbox > label > div > div > div {
-        color: white !important;
-    }
-    .stSelectbox > label > div > div > div > div {
-        color: white !important;
-    }
-    .stSidebar .stSelectbox {
-        color: white !important;
-    }
-    .stSidebar .stSelectbox > div > div > div {
-        color: white !important;
-    }
-    .stSidebar .stSelectbox > div > div > div > div {
-        color: white !important;
-    }
+    /* Bronze color for the grading scale selector */
     .stSidebar .stSelectbox label {
-        color: white !important;
+        color: #937329 !important;
     }
-    .stSidebar .stSelectbox > label > div {
-        color: white !important;
+    /* This targets the selected value text */
+    .stSidebar .stSelectbox > div > div {
+        color: #937329 !important;
     }
-    .stSidebar .stSelectbox > label > div > div {
-        color: white !important;
+    /* This targets the dropdown arrow */
+    .stSidebar .stSelectbox svg {
+        fill: #937329 !important;
     }
-    .stSidebar .stSelectbox > label > div > div > div {
-        color: white !important;
-    }
-    .stSidebar .stSelectbox > label > div > div > div > div {
-        color: white !important;
-    }
-    /* Additional CSS to ensure dropdown options are visible */
-    div[data-baseweb="select"] {
-        color: white !important;
-    }
-    div[data-baseweb="select"] > div {
-        color: white !important;
-    }
-    div[data-baseweb="select"] > div > div {
-        color: white !important;
-    }
-    div[data-baseweb="select"] > div > div > div {
-        color: white !important;
-    }
-    div[data-baseweb="select"] > div > div > div > div {
-        color: white !important;
-    }
-    div[data-baseweb="select"] div[role="listbox"] {
-        color: white !important;
-    }
-    div[data-baseweb="select"] div[role="listbox"] > div {
-        color: white !important;
-    }
-    div[data-baseweb="select"] div[role="listbox"] > div > div {
-        color: white !important;
-    }
-    div[data-baseweb="select"] div[role="listbox"] > div > div > div {
-        color: white !important;
-    }
-    /* Fix for selected text in dropdown - WHITE */
-    div[data-baseweb="select"] div[role="listbox"] > div[data-selected="true"] {
-        color: white !important;
-    }
-    /* Fix for hover state in dropdown - WHITE */
-    div[data-baseweb="select"] div[role="listbox"] > div:hover {
-        color: white !important;
-    }
-    /* Fix for dropdown arrow */
-    svg[data-testid="stSelectboxDropdownIcon"] {
-        fill: white !important;
-    }
-    /* Fix for the selected value display - WHITE */
-    div[data-baseweb="select"] > div > div > div > div > div {
-        color: white !important;
-    }
-    /* Additional fix for the selected value - WHITE */
-    div[data-baseweb="select"] > div > div > div > div > div > div {
+    
+    /* Kept original white color for other dropdowns if any - this is a fallback */
+    .stSelectbox > div > div > div {
         color: white !important;
     }
 </style>
