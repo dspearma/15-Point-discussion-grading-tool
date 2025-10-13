@@ -478,7 +478,7 @@ def generate_video_aliases(video_text: str) -> Set[str]:
         return base_aliases
     video_clean = fix_encoding(video_text)
     # Look for quoted titles
-    quoted_titles = re.findall(r"[\\"'“”]([^\\"'“”]{3,120})[\\"'“”]", video_clean)
+    quoted_titles = re.findall(r"[\"'\u201c\u201d]([^\"'\u201c\u201d]{3,120})[\"'\u201c\u201d]", video_clean)
     for title in quoted_titles:
         cleaned_title = title.strip()
         if cleaned_title:
