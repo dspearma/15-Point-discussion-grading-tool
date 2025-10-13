@@ -430,37 +430,25 @@ def analyze_video_reference_locally(submission_text: str, video_text: str) -> Di
     score = 2.0
     feedback = "You successfully integrated concepts from the video, but you did not provide a specific citation as required for higher credit. You must include the author/creator and a timestamp to earn more than the minimum score."
 
-    # Extract creator's name from video_text (assuming it's a prominent capitalized name)
     creator_name = ""
-    # Regex to find a capitalized name, likely the creator
     creator_match = re.search(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', video_text)
     if creator_match:
         creator_name = creator_match.group(1).strip()
 
-    # Define regex patterns
-    # Pattern for creator and timestamp, e.g., (Darius, 0:12) or Darius (0:12)
     creator_ts_pattern = re.compile(r'\(\s*' + re.escape(creator_name.split()[0]) + r'\s*,\s*\d{1,2}:\d{2}\s*\)|' + re.escape(creator_name) + r'\s*\(\s*\d{1,2}:\d{2}\s*\)', re.IGNORECASE) if creator_name else None
-    
-    # General timestamp pattern, e.g., (1:02) or at 1:02
     timestamp_pattern = re.compile(r'\b\d{1,2}:\d{2}\b')
-
-    # Creator name pattern
     creator_pattern = re.compile(r'\b' + re.escape(creator_name) + r'\b', re.IGNORECASE) if creator_name else None
-
-    # Generic video keywords
     video_keyword_pattern = re.compile(r'\b(video|youtube|film)\b', re.IGNORECASE)
 
-    # Check for patterns in submission text
     has_creator_and_ts = creator_ts_pattern and creator_ts_pattern.search(submission_text)
     has_timestamp = timestamp_pattern.search(submission_text)
     has_creator = creator_pattern and creator_pattern.search(submission_text)
     has_video_keyword = video_keyword_pattern.search(submission_text)
 
-    # Apply scoring logic
     if has_creator_and_ts:
         score = 4.0
         feedback = f"Excellent! You specifically referenced '{creator_name}' and included timestamps, demonstrating strong engagement with the video content. Full credit awarded."
-    elif has_creator and has_timestamp: # Covers cases where they are not in the same parenthesis
+    elif has_creator and has_timestamp:
         score = 4.0
         feedback = f"Excellent! You specifically referenced '{creator_name}' and included timestamps, demonstrating strong engagement with the video content. Full credit awarded."
     elif has_creator:
@@ -488,7 +476,7 @@ def construct_final_feedback(
     prompt_feedback = llm_results.get('prompt_feedback', 'Feedback missing for prompt quality.')
     key_terms_feedback = llm_results.get('key_terms_feedback', local_feedback.get('key_terms_fallback', 'Feedback missing for key terms.'))
     reading_feedback = local_feedback.get('reading_feedback', llm_results.get('reading_feedback', 'Feedback missing for reading reference.'))
-    video_feedback = local_feedback.get('video_feedback', 'Feedback missing for video reference.') # Prioritize local feedback
+    video_feedback = local_feedback.get('video_feedback', 'Feedback missing for video reference.') 
     general_feedback_llm = llm_results.get('general_feedback', 'Overall submission quality was strong.')
 
     engagement_feedback = local_feedback['engagement_feedback']
@@ -519,7 +507,7 @@ def construct_final_feedback(
         prompt_key_formatted = f"PROMPT AND KEY TERMS [{scaled_prompt_score + scaled_key_terms_score:.1f}/5.0]: {prompt_key_combined_feedback}"
         video_formatted = f"REFERENCE TO VIDEO [{scaled_video_score:.1f}/5.0]: {video_feedback}"
         reading_formatted = f"REFERENCE TO READING [{scaled_reading_score:.1f}/5.0]: {reading_feedback}"
-    else:  # 16-point (4 categories)
+    else:
         prompt_key_formatted = f"PROMPT AND KEY TERMS [{combined_prompt_key_score:.1f}/4.0]: {prompt_key_combined_feedback}"
         video_formatted = f"REFERENCE TO VIDEO [{local_scores['video_score']:.1f}/4.0]: {video_feedback}"
         reading_formatted = f"REFERENCE TO READING [{local_scores['reading_score']:.1f}/4.0]: {reading_feedback}"
@@ -545,7 +533,7 @@ def construct_final_feedback(
             reading_formatted,
             general_formatted
         ])
-    else:  # 16-point (4 categories)
+    else:
         final_feedback = '\n'.join([
             prompt_key_formatted,
             video_formatted,
@@ -578,164 +566,108 @@ def grade_submission_with_retries(
 
     # 1. Local Scoring & Data Preparation
     engagement_analysis = analyze_engagement_quality(replies)
-    video_analysis = analyze_video_reference_locally(submission_text, video_text) # NEW: Local video check
+    video_analysis = analyze_video_reference_locally(submission_text, video_text)
     engagement_score = engagement_analysis['score']
     detected_terms = detect_key_terms_presence(submission_text, key_terms)
     detected_terms_str = ', '.join(detected_terms) if detected_terms else 'none detected'
     reading_info = {}
 
-    if "READING:" in reading_text:
-        reading_line = ""
-        for line in reading_text.split('\n'):
-            if "READING:" in line:
-                reading_line = line.strip()
-                break
-        author_match = re.search(r'READING:\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', reading_line)
-        assigned_author = author_match.group(1).strip() if author_match else ""
-    else:
-        author_match = re.search(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', reading_text.strip())
-        assigned_author = author_match.group(1).strip() if author_match else ""
+    # --- UPDATED READING INFO EXTRACTION ---
+    author_match = re.search(r'READING:\s*([A-Za-z]+)', reading_text)
+    assigned_author = author_match.group(1).strip() if author_match else ""
 
     page_numbers = []
+    pages_match = re.search(r'pages?\s+([\d.,\s\-and]+)', reading_text, re.IGNORECASE)
+    if pages_match:
+        page_str = pages_match.group(1)
+        page_numbers = [float(p) for p in re.findall(r'[\d\.]+', page_str)]
     
-    patterns = [
-        r'pages?\s+([\d.,\s-]+)',
-        r'p\.?\s*([\d.,\s-]+)',
-        r'([\d.,\s-]+)'
-    ]
-
-    for pattern in patterns:
-        pages_match = re.search(pattern, reading_text, re.IGNORECASE)
-        if pages_match:
-            page_str = pages_match.group(1)
-            page_numbers = re.findall(r'[\d.]+', page_str)
-            page_numbers = [float(p) for p in page_numbers]
-            break
-
-    if assigned_author:
-        reading_info['author_last_name'] = assigned_author
-    else:
-        reading_info['author_last_name'] = ""
-
+    reading_info['author_last_name'] = assigned_author
     if page_numbers:
         page_numbers.sort()
         if len(page_numbers) == 1:
-            page_num = page_numbers[0]
-            if page_num.is_integer():
-                reading_info['page_range_expected'] = f"page {int(page_num)}"
-            else:
-                reading_info['page_range_expected'] = f"page {page_num}"
-        elif len(page_numbers) == 2:
-            if page_numbers[0].is_integer() and page_numbers[1].is_integer():
-                reading_info['page_range_expected'] = f"pages {int(page_numbers[0])}-{int(page_numbers[1])}"
-            else:
-                reading_info['page_range_expected'] = f"pages {page_numbers[0]}-{page_numbers[1]}"
+            reading_info['page_range_expected'] = f"page {page_numbers[0]}"
         else:
-            formatted_pages = []
-            for p in page_numbers:
-                if p.is_integer():
-                    formatted_pages.append(str(int(p)))
-                else:
-                    formatted_pages.append(str(p))
-            reading_info['page_range_expected'] = f"pages {', '.join(formatted_pages)}"
+            # Format as a list for clarity, e.g., "pages 4.1, 4.2, 4.3"
+            reading_info['page_range_expected'] = f"pages {', '.join(map(str, page_numbers))}"
     else:
         reading_info['page_range_expected'] = "unspecified pages"
-
+    # --- END UPDATED READING INFO ---
+    
     highest_max_reading_score = 2.0
-    best_citation_status_msg = f"NO CLEAR REFERENCE TO THE ASSIGNED READING WAS DETECTED. The minimum score of **2.0** applies."
+    best_citation_status_msg = f"NO CLEAR REFERENCE to the assigned reading ('{assigned_author}') was detected. Minimum score applies."
     detected_author = ""
 
     if reading_info['author_last_name']:
         assigned_author_lower = reading_info['author_last_name'].lower()
         author_present = re.search(r'\b' + re.escape(assigned_author_lower) + r'\b', submission_text.lower())
+        
         page_present = False
         detected_pages = []
         if page_numbers:
-            if len(page_numbers) == 2:
-                start_page = int(min(page_numbers))
-                end_page = int(max(page_numbers))
-                cited_pages = re.findall(r'(?:p|pg|page)s?\.?\s*(\d+)', submission_text, re.IGNORECASE)
-                for page_str in cited_pages:
-                    cited_num = int(page_str)
-                    if start_page <= cited_num <= end_page:
-                        page_present = True
-                        detected_pages.append(page_str)
-            else:
-                for page in page_numbers:
-                    page_str = str(int(page)) if isinstance(page, float) and page.is_integer() else str(page)
-                    patterns = [
-                        r'\b' + re.escape(page_str) + r'\b',
-                        r'\bp\.?\s*' + re.escape(page_str) + r'\b',
-                        r'\bpage\s*' + re.escape(page_str) + r'\b',
-                        r'\bpages?\s*' + re.escape(page_str) + r'\b'
-                    ]
-                    for pattern in patterns:
-                        if re.search(pattern, submission_text, re.IGNORECASE):
-                            page_present = True
-                            detected_pages.append(page_str)
-                            break
-                    if page_present and len(page_numbers) > 1:
-                        break
+            for page in page_numbers:
+                page_str = str(page)
+                # Check for patterns like (..., 4.2) or page 4.2
+                if re.search(r'[\(\s,]\s*p(?:g|age)?\.?\s*' + re.escape(page_str) + r'\b', submission_text, re.IGNORECASE):
+                    page_present = True
+                    detected_pages.append(page_str)
+        
+        # Look for a different cited author, e.g. (Florida State College..., page 4.2)
+        if not author_present:
+            citation_match = re.search(r'\(([^,)]+),[^)]*p(?:g|age)?\.?\s*[\d\.]+', submission_text)
+            if citation_match:
+                potential_author = citation_match.group(1).strip()
+                if potential_author.lower() != assigned_author_lower:
+                    detected_author = potential_author
 
         if author_present and page_present:
             highest_max_reading_score = 4.0
-            best_citation_status_msg = f"Both the author ('{assigned_author}') and a relevant page number from the assigned reading were detected. Full credit awarded."
-        elif author_present:
-            highest_max_reading_score = 3.0
-            best_citation_status_msg = f"The author ('{assigned_author}') was mentioned, but no specific page number from the assigned reading was detected. Partial credit awarded."
+            best_citation_status_msg = f"Both the author ('{assigned_author}') and a relevant page number were detected. Full credit."
+        elif detected_author and page_present:
+            highest_max_reading_score = 3.5
+            best_citation_status_msg = f"A correct page number was cited, but with the wrong source ('{detected_author}' instead of '{assigned_author}'). Partial credit."
         elif page_present:
             highest_max_reading_score = 3.5
-            best_citation_status_msg = f"A page number from the assigned reading was detected, but the author ('{assigned_author}') was not mentioned. Partial credit awarded."
-
-        if not author_present:
-            potential_authors = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', submission_text)
-            for potential_author in potential_authors:
-                if potential_author.lower() in ['the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by']:
-                    continue
-                if len(potential_author) > 3:
-                    detected_author = potential_author
-                    if page_present:
-                        highest_max_reading_score = 3.5
-                        best_citation_status_msg = f"A reference to '{potential_author}' with page number {', '.join(detected_pages)} was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded for the correct page reference."
-                    else:
-                        highest_max_reading_score = 2.5
-                        best_citation_status_msg = f"A reference to '{potential_author}' was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded."
-                    break
+            best_citation_status_msg = f"A correct page number was cited, but the author was missing. Partial credit."
+        elif author_present:
+            highest_max_reading_score = 3.0
+            best_citation_status_msg = f"The author ('{assigned_author}') was mentioned, but no specific page number was cited. Partial credit."
+        elif detected_author:
+            highest_max_reading_score = 2.5
+            best_citation_status_msg = f"An incorrect source ('{detected_author}') was cited without a correct page number. Minimum score applies."
     else:
         highest_max_reading_score = 2.0
-        best_citation_status_msg = f"The assigned reading information did not specify an author. The minimum score of **2.0** applies."
+        best_citation_status_msg = "Could not determine assigned author from lesson plan. Minimum score applies."
 
     max_reading_score = highest_max_reading_score
-    citation_status_msg = best_citation_status_msg
-
+    
+    # --- UPDATED FEEDBACK LOGIC ---
     if max_reading_score == 4.0:
-        reading_feedback_local = f"You successfully integrated concepts from the reading and provided a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}), earning full credit for this section"
+        reading_feedback_local = f"Excellent! You correctly cited the assigned source ('{assigned_author}') with a specific page number. This is the correct format and earns full credit."
     elif max_reading_score == 3.5:
         if detected_author:
-            reading_feedback_local = f"You referenced page number(s) from the assigned reading, but cited the wrong author. Be sure to include the correct author to earn full credit"
-        else:
-            reading_feedback_local = f"A page number from the assigned reading was detected, but the author was not mentioned. Include both the author and page number for full credit"
+            reading_feedback_local = f"You cited a specific page number from the reading, which is great. However, you cited '{detected_author}' instead of the assigned source, '{assigned_author}'. To earn full credit, please ensure you use the correct source. The required format is (Author, page #)."
+        else: # Page present, author missing
+            reading_feedback_local = f"You included a specific page number from the assigned reading, but the author was not mentioned. To earn full credit, please include the author ('{assigned_author}'). The required format is (Author, page #)."
     elif max_reading_score == 3.0:
-        reading_feedback_local = f"You mentioned the author ({assigned_author}), demonstrating engagement with the reading. However, you did not provide a specific page number from the assigned reading ({reading_info['page_range_expected']}) as required for higher credit. Include specific page references to earn full credit"
+        reading_feedback_local = f"You correctly identified the author ('{assigned_author}'), but did not include a specific page number from the assigned reading ({reading_info['page_range_expected']}). To earn full credit, you must include a page number. The required format is (Author, page #)."
     elif max_reading_score == 2.5:
-        reading_feedback_local = f"You referenced the wrong author in your submission. Be sure to include the correct author and include a page number to earn more credit"
-    else:
-        if assigned_author:
-            reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}) as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score"
-        else:
-            reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score"
+        reading_feedback_local = f"You referenced '{detected_author}', but this is not the assigned source ('{assigned_author}') and no page number was included. Please be sure to cite the correct source material with a page number to earn more credit. The required format is (Author, page #)."
+    else: # 2.0
+        reading_feedback_local = f"No specific citation from the assigned reading ('{assigned_author}', {reading_info['page_range_expected']}) was detected. To earn more than the minimum score, you must include a citation in the format (Author, page #)."
+    # --- END UPDATED FEEDBACK ---
 
     local_scores = {
         'engagement_score': engagement_score,
         'prompt_score': 0.0,
         'reading_score': max_reading_score,
         'key_terms_score': 0.0,
-        'video_score': video_analysis['score'] # SET FROM PYTHON DETECTION
+        'video_score': video_analysis['score']
     }
     local_feedback = {
         'engagement_feedback': engagement_analysis['feedback'],
         'reading_feedback': reading_feedback_local,
-        'video_feedback': video_analysis['feedback'], # SET FROM PYTHON DETECTION
+        'video_feedback': video_analysis['feedback'],
         'key_terms_fallback': f"LLM failed to provide key terms feedback. Detected terms: {detected_terms_str}"
     }
 
@@ -743,7 +675,7 @@ def grade_submission_with_retries(
 SCORING Guidelines for LLM (4 points total - Reading & Video are scored separately):
 1. PROMPT ADHERENCE (Minimum 1.0 - 2.0): How well does the student address the entire prompt? (2.0 Maximum)
 2. READING REFERENCE: **This section is scored separately by the system as {max_reading_score:.1f}. Do not provide a reading_score.**
-   - Citation Status (for context): {citation_status_msg}
+   - Citation Status (for context): {best_citation_status_msg}
 3. VIDEO REFERENCE: **This section is scored separately by the system as {video_analysis['score']:.1f}. Do not provide a video_score.**
 4. KEY TERMS USAGE (Minimum 1.0 - 2.0): Did the student use at least one key term (from the detected list) in a way that demonstrates contextual understanding? (2.0 Maximum)
    - FULL CREDIT (2.0) MUST BE AWARDED if ONE or more terms are used meaningfully.
@@ -1229,3 +1161,4 @@ if csv_file and docx_file:
                     st.error(f"An error occurred: {str(e)}")
                     import traceback
                     st.error(traceback.format_exc())
+
