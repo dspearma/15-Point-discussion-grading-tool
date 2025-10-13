@@ -1538,7 +1538,6 @@ if not api_key:
     if api_key_input:
         api_key = api_key_input.strip()
         api_key_source = "User input"
-else:
     # If we already have an API key, show a masked input
     st.sidebar.text_input(
         "OpenRouter API Key",
@@ -1550,12 +1549,14 @@ else:
 # Display API key status
     if api_key.startswith("sk-or-v1-") and len(api_key) > 20:
         st.sidebar.success("API key format appears valid")
+if api_key:
+    if api_key.startswith("sk-or-v1-") and len(api_key) > 20:
+        st.sidebar.success("API key format appears valid")
     else:
         st.sidebar.error(
             "Invalid API key format. OpenRouter API keys should start with 'sk-or-v1-' and be at least 20 characters long."
         )
 else:
-st.sidebar.markdown(
     st.sidebar.markdown(
         "Get your API key from [OpenRouter](https://openrouter.ai/)"
     )
