@@ -1538,7 +1538,6 @@ if not api_key:
     if api_key_input:
         api_key = api_key_input.strip()
         api_key_source = "User input"
-
 else:
     # If we already have an API key, show a masked input
     st.sidebar.text_input(
@@ -1549,7 +1548,6 @@ else:
     )
 
 # Display API key status
-
     if api_key.startswith("sk-or-v1-") and len(api_key) > 20:
         st.sidebar.success("API key format appears valid")
     else:
@@ -1558,10 +1556,11 @@ else:
         )
 else:
 st.sidebar.markdown(
-    "Get your API key from [OpenRouter](https://openrouter.ai/)"
-)
-
-# Add grading scale selector
+    st.sidebar.markdown(
+        "Get your API key from [OpenRouter](https://openrouter.ai/)"
+    )
+    
+    # Add grading scale selector
 
 grading_scale = st.sidebar.selectbox(
     "Select Grading Scale",
