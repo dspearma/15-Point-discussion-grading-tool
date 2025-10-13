@@ -93,15 +93,12 @@ def retry_with_backoff(func, max_retries: int = 3, base_delay: int = 5, max_dela
 def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 60, max_retries: int = 3, api_key: str = None) -> str:
     """Make API call with retries and proper error handling."""
     def api_call():
-        # Check if API key is provided
         if not api_key:
             raise ValueError("No API key provided")
         
-        # Ensure the API key is properly formatted
         if not api_key.startswith("sk-or-v1-"):
             raise ValueError(f"Invalid API key format. Expected format: sk-or-v1-...")
         
-        # Create a new headers dictionary to avoid any potential issues
         new_headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -109,10 +106,8 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
             "X-Title": "Discussion Grading Tool"
         }
         
-        # Make the API call
         response = requests.post(api_url, headers=new_headers, json=payload, timeout=timeout)
         
-        # Handle specific HTTP errors
         if response.status_code == 401:
             raise ValueError("Authentication failed. Please check your API key.")
         elif response.status_code == 429:
@@ -127,7 +122,7 @@ def robust_api_call(api_url: str, headers: Dict, payload: Dict, timeout: int = 6
             raise ValueError("Invalid API response format - missing choices")
 
         if result["choices"][0]["message"]["content"] is None:
-                 raise ValueError("Empty content block received from API.")
+                raise ValueError("Empty content block received from API.")
 
         grade_response = result["choices"][0]["message"]["content"]
         if not grade_response.strip():
@@ -142,16 +137,13 @@ def robust_json_parsing(response_text: str, max_retries: int = 2) -> Dict:
     def parse_json():
         response_text_clean = fix_encoding(response_text.strip())
 
-        # Clean common LLM formatting issues (code fences)
         response_text_clean = re.sub(r'^```json\s*', '', response_text_clean, flags=re.DOTALL)
         response_text_clean = re.sub(r'\s*```$', '', response_text_clean, flags=re.DOTALL)
         response_text_clean = re.sub(r'^```\s*', '', response_text_clean, flags=re.DOTALL)
 
-        # Attempt standard JSON loading
         try:
             return json.loads(response_text_clean)
         except json.JSONDecodeError as e:
-            # Use regex to find the likely JSON object
             json_match = re.search(r'\{.*\}', response_text_clean, re.DOTALL)
             if json_match:
                 extracted_json = json_match.group(0)
@@ -181,7 +173,6 @@ def extract_section_robust(text: str, section_name: str, alternative_names: List
     for i, line in enumerate(lines):
         line_clean = line.strip()
 
-        # Check for start of section
         is_header = False
 
         if not in_section:
@@ -203,7 +194,6 @@ def extract_section_robust(text: str, section_name: str, alternative_names: List
             continue
 
         if in_section:
-            # Check for stop condition
             is_stop_indicator = False
             for indicator in stop_indicators:
                 if re.match(r'^\s*' + re.escape(indicator) + r'[:\s]*', line_clean, re.IGNORECASE) and len(line_clean.split()) < 8:
@@ -214,7 +204,6 @@ def extract_section_robust(text: str, section_name: str, alternative_names: List
                 in_section = False
                 break
 
-            # Continue collecting content
             if line_clean:
                 content_lines.append(line_clean)
 
@@ -234,11 +223,9 @@ def parse_lesson_plan_comprehensive(docx_content: bytes):
     docx_io = io.BytesIO(docx_content)
     document = Document(docx_io)
 
-    # Extract all text
     full_text = "\n".join([p.text.strip() for p in document.paragraphs if p.text.strip()])
     full_text_clean = fix_encoding(full_text)
 
-    # Define sections and their required alternate names/stop indicators dynamically
     sections_to_extract = {
         "Discussion Prompt": (["Discussion", "Prompt", "Discussion Question", "Question"], ['Reading', 'Video', 'Key Terms', 'Objective', 'Key Concepts', 'Materials']),
         "Reading": (["Assigned Reading", "Required Reading", "READING"], ['Discussion', 'Video', 'Key Terms', 'Objective', 'Key Concepts', 'Materials', 'Prompt']),
@@ -252,7 +239,6 @@ def parse_lesson_plan_comprehensive(docx_content: bytes):
     for name, (alts, stops) in sections_to_extract.items():
         parsed_sections[name] = extract_section_robust(full_text_clean, name, alts, stops)
 
-    # --- Key Terms Specific Parsing ---
     key_terms_str = parsed_sections["Key Terms"]
     key_terms = []
 
@@ -271,14 +257,11 @@ def parse_lesson_plan_comprehensive(docx_content: bytes):
     unique_key_terms = list(set([term for term in key_terms if len(term) > 2]))
     unique_key_terms.sort()
 
-    # --- Fallback Discussion Prompt ---
     discussion_prompt = parsed_sections["Discussion Prompt"]
     if not discussion_prompt.strip():
-        # Fallback 1: Use Objective
         if parsed_sections["Objective"].strip():
             discussion_prompt = parsed_sections["Objective"]
         else:
-            # Fallback 2: Look for questions in the main text
             question_match = re.search(r'([A-Za-z\s]+[?])', full_text_clean[-1000:], re.DOTALL)
             if question_match:
                 discussion_prompt = question_match.group(1).strip()
@@ -349,7 +332,6 @@ def detect_key_terms_presence(submission_text: str, key_terms: List[str]) -> Lis
 
     return list(set(detected_terms))
 
-# EXACT Engagement Quality Analysis from your provided code
 def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
     replies = [fix_encoding(reply) for reply in replies]
     valid_replies = [reply for reply in replies if reply and len(reply.split()) >= 10]
@@ -370,7 +352,6 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
         word_count = len(reply.split())
         quality_score = 3.0
 
-        # Indicators of deep engagement (expanded and more flexible)
         deep_engagement_indicators = [
             'i disagree', 'i believe that', 'i believe it', 'i agree that', 'i understand',
             'building on', 'contrary to', 'critique', 'elaborate', 'perspective', 'i appreciated',
@@ -381,7 +362,6 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
             'your observation', 'another way to think', 'i wonder if', 'what if we consider'
         ]
 
-        # Indicators of supporting arguments (expanded)
         supporting_indicators = [
             'because', 'however', 'although', 'critical', 'analysis', 'blueprint',
             'therefore', 'moreover', 'furthermore', 'in contrast', 'similarly',
@@ -389,17 +369,11 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
             'evidence shows', 'research indicates', 'as shown by', 'considering that'
         ]
 
-        # Check for engagement indicators
         has_deep_engagement = any(term in reply_lower for term in deep_engagement_indicators)
         has_supporting_args = any(term in reply_lower for term in supporting_indicators)
-
-        # Check for question marks (asking thoughtful questions)
         has_questions = '?' in reply
-
-        # Check for specific examples or concrete details (numbers, names, specific events)
         has_specific_details = bool(re.search(r'\b\d+\b', reply)) or bool(re.search(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:argued|stated|mentioned|noted|wrote|said)', reply))
 
-        # Scoring logic - more generous and quality-focused
         if word_count >= 75 and (has_deep_engagement or has_supporting_args or has_specific_details):
             quality_score = 4.0
         elif word_count >= 60 and (has_deep_engagement or has_supporting_args):
@@ -433,9 +407,8 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
         else:
             name_match_only = re.search(r'^([A-Za-z]+),', highest_quality_reply.strip())
             if name_match_only:
-                   recipient_name = name_match_only.group(1).strip()
+                    recipient_name = name_match_only.group(1).strip()
 
-    # Generate specific feedback for point deductions
     if highest_quality_score >= 4.0:
         feedback = f"Excellent engagement! Your reply to {recipient_name} demonstrates substantive interaction with their ideas, showing depth of analysis and critical thinking that meets the highest standards for peer discussion."
     elif highest_quality_score >= 3.5:
@@ -452,6 +425,57 @@ def analyze_engagement_quality(replies: List[str]) -> Dict[str, Any]:
         'highest_quality_score': highest_quality_score
     }
 
+def analyze_video_reference_locally(submission_text: str, video_text: str) -> Dict[str, Any]:
+    """Analyzes the submission for references to the video material using local rules."""
+    score = 2.0
+    feedback = "You successfully integrated concepts from the video, but you did not provide a specific citation as required for higher credit. You must include the author/creator and a timestamp to earn more than the minimum score."
+
+    # Extract creator's name from video_text (assuming it's a prominent capitalized name)
+    creator_name = ""
+    # Regex to find a capitalized name, likely the creator
+    creator_match = re.search(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', video_text)
+    if creator_match:
+        creator_name = creator_match.group(1).strip()
+
+    # Define regex patterns
+    # Pattern for creator and timestamp, e.g., (Darius, 0:12) or Darius (0:12)
+    creator_ts_pattern = re.compile(r'\(\s*' + re.escape(creator_name.split()[0]) + r'\s*,\s*\d{1,2}:\d{2}\s*\)|' + re.escape(creator_name) + r'\s*\(\s*\d{1,2}:\d{2}\s*\)', re.IGNORECASE) if creator_name else None
+    
+    # General timestamp pattern, e.g., (1:02) or at 1:02
+    timestamp_pattern = re.compile(r'\b\d{1,2}:\d{2}\b')
+
+    # Creator name pattern
+    creator_pattern = re.compile(r'\b' + re.escape(creator_name) + r'\b', re.IGNORECASE) if creator_name else None
+
+    # Generic video keywords
+    video_keyword_pattern = re.compile(r'\b(video|youtube|film)\b', re.IGNORECASE)
+
+    # Check for patterns in submission text
+    has_creator_and_ts = creator_ts_pattern and creator_ts_pattern.search(submission_text)
+    has_timestamp = timestamp_pattern.search(submission_text)
+    has_creator = creator_pattern and creator_pattern.search(submission_text)
+    has_video_keyword = video_keyword_pattern.search(submission_text)
+
+    # Apply scoring logic
+    if has_creator_and_ts:
+        score = 4.0
+        feedback = f"Excellent! You specifically referenced '{creator_name}' and included timestamps, demonstrating strong engagement with the video content. Full credit awarded."
+    elif has_creator and has_timestamp: # Covers cases where they are not in the same parenthesis
+        score = 4.0
+        feedback = f"Excellent! You specifically referenced '{creator_name}' and included timestamps, demonstrating strong engagement with the video content. Full credit awarded."
+    elif has_creator:
+        score = 3.5
+        feedback = f"Good reference. You mentioned the video's creator, '{creator_name}'. To earn full credit, also include specific timestamps to support your points."
+    elif has_timestamp:
+        score = 3.0
+        feedback = "You included a timestamp, which is great for specificity. To improve, also mention the creator's name to make the citation complete."
+    elif has_video_keyword:
+        score = 2.5
+        feedback = "You mentioned the 'video', but to earn higher credit, you need to provide more specific references, such as the creator's name or timestamps from the video."
+
+    return {'score': score, 'feedback': feedback}
+
+
 def construct_final_feedback(
     llm_results: Dict,
     local_scores: Dict[str, float],
@@ -464,14 +488,13 @@ def construct_final_feedback(
     prompt_feedback = llm_results.get('prompt_feedback', 'Feedback missing for prompt quality.')
     key_terms_feedback = llm_results.get('key_terms_feedback', local_feedback.get('key_terms_fallback', 'Feedback missing for key terms.'))
     reading_feedback = local_feedback.get('reading_feedback', llm_results.get('reading_feedback', 'Feedback missing for reading reference.'))
-    video_feedback = llm_results.get('video_feedback', 'Feedback missing for video reference.')
+    video_feedback = local_feedback.get('video_feedback', 'Feedback missing for video reference.') # Prioritize local feedback
     general_feedback_llm = llm_results.get('general_feedback', 'Overall submission quality was strong.')
 
     engagement_feedback = local_feedback['engagement_feedback']
 
     def transform_to_second_person(text):
         if not text: return ""
-        # Fix the "you's" issue by replacing it with "you are"
         text = re.sub(r'\byou\'s\b', 'you are', text, flags=re.IGNORECASE)
         text = re.sub(r'\b(The student|This student|They|Their|He|His|She|Her)\b', lambda m: {'The student': 'You', 'This student': 'You', 'They': 'You', 'Their': 'Your', 'He': 'You', 'His': 'Your', 'She': 'You', 'Her': 'Your'}.get(m.group(1), m.group(1)), text, flags=re.IGNORECASE)
         if text:
@@ -487,26 +510,22 @@ def construct_final_feedback(
 
     prompt_key_combined_feedback = f"{prompt_feedback.strip()} {key_terms_feedback.strip()}"
     
-    # Format scores based on grading scale
     if grading_scale == "15-point (3 categories)":
-        # Scale up the scores for 15-point scale (5 points per category)
-        # For 15-point scale, prompt and key terms are 2.5 points each
-        scaled_prompt_score = round_nearest_half(local_scores['prompt_score'] * 1.25)  # Scale from 2.0 to 2.5
-        scaled_key_terms_score = round_nearest_half(local_scores['key_terms_score'] * 1.25)  # Scale from 2.0 to 2.5
-        scaled_video_score = round_nearest_half(local_scores['video_score'] * 1.25)  # Scale from 4.0 to 5.0
-        scaled_reading_score = round_nearest_half(local_scores['reading_score'] * 1.25)  # Scale from 4.0 to 5.0
+        scaled_prompt_score = round_nearest_half(local_scores['prompt_score'] * 1.25)
+        scaled_key_terms_score = round_nearest_half(local_scores['key_terms_score'] * 1.25)
+        scaled_video_score = round_nearest_half(local_scores['video_score'] * 1.25)
+        scaled_reading_score = round_nearest_half(local_scores['reading_score'] * 1.25)
         
         prompt_key_formatted = f"PROMPT AND KEY TERMS [{scaled_prompt_score + scaled_key_terms_score:.1f}/5.0]: {prompt_key_combined_feedback}"
-        video_formatted = f"REFERENCE TO VIDEO [{scaled_video_score:.1f}]: {video_feedback}"
-        reading_formatted = f"REFERENCE TO READING [{scaled_reading_score:.1f}]: {reading_feedback}"
+        video_formatted = f"REFERENCE TO VIDEO [{scaled_video_score:.1f}/5.0]: {video_feedback}"
+        reading_formatted = f"REFERENCE TO READING [{scaled_reading_score:.1f}/5.0]: {reading_feedback}"
     else:  # 16-point (4 categories)
-        prompt_key_formatted = f"PROMPT AND KEY TERMS [{combined_prompt_key_score:.1f}]: {prompt_key_combined_feedback}"
-        video_formatted = f"REFERENCE TO VIDEO [{local_scores['video_score']:.1f}]: {video_feedback}"
-        reading_formatted = f"REFERENCE TO READING [{local_scores['reading_score']:.1f}]: {reading_feedback}"
-        engagement_formatted = f"DISCUSSION ENGAGEMENT [{local_scores['engagement_score']:.1f}]: {engagement_feedback}"
+        prompt_key_formatted = f"PROMPT AND KEY TERMS [{combined_prompt_key_score:.1f}/4.0]: {prompt_key_combined_feedback}"
+        video_formatted = f"REFERENCE TO VIDEO [{local_scores['video_score']:.1f}/4.0]: {video_feedback}"
+        reading_formatted = f"REFERENCE TO READING [{local_scores['reading_score']:.1f}/4.0]: {reading_feedback}"
+        engagement_formatted = f"DISCUSSION ENGAGEMENT [{local_scores['engagement_score']:.1f}/4.0]: {engagement_feedback}"
 
     if improvement_areas:
-        # Remove "Discussion Engagement" from improvement areas for 15-point scale
         if grading_scale == "15-point (3 categories)" and "Discussion Engagement" in improvement_areas:
             improvement_areas = [area for area in improvement_areas if area != "Discussion Engagement"]
             
@@ -519,7 +538,6 @@ def construct_final_feedback(
 
     general_formatted = f"GENERAL FEEDBACK: {improvement_focus}"
 
-    # Construct final feedback based on grading scale
     if grading_scale == "15-point (3 categories)":
         final_feedback = '\n'.join([
             prompt_key_formatted,
@@ -560,54 +578,40 @@ def grade_submission_with_retries(
 
     # 1. Local Scoring & Data Preparation
     engagement_analysis = analyze_engagement_quality(replies)
+    video_analysis = analyze_video_reference_locally(submission_text, video_text) # NEW: Local video check
     engagement_score = engagement_analysis['score']
     detected_terms = detect_key_terms_presence(submission_text, key_terms)
     detected_terms_str = ', '.join(detected_terms) if detected_terms else 'none detected'
     reading_info = {}
 
-    # --- Extract REQUIRED READING INFO ---
-    # The lesson plan will always say "READING: [reading details]"
-    # Extract the author and page numbers from the reading text
-
-    # First, check if "READING:" is in the text
     if "READING:" in reading_text:
-        # Extract the full line that contains "READING:"
         reading_line = ""
         for line in reading_text.split('\n'):
             if "READING:" in line:
                 reading_line = line.strip()
                 break
-
-        # Extract author (first word after "READING:")
         author_match = re.search(r'READING:\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', reading_line)
         assigned_author = author_match.group(1).strip() if author_match else ""
     else:
-        # Fallback if "READING:" is not explicitly in the text
-        # Extract author (first word before the first comma)
         author_match = re.search(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', reading_text.strip())
         assigned_author = author_match.group(1).strip() if author_match else ""
 
-    # Look for page numbers in various formats
     page_numbers = []
     
-    # Try multiple patterns to extract page numbers
     patterns = [
-        r'pages?\s+([\d.,\s-]+)',  # pages 81-83 or page 81
-        r'p\.?\s*([\d.,\s-]+)',    # p.81 or p 81
-        r'([\d.,\s-]+)'            # just numbers (fallback)
+        r'pages?\s+([\d.,\s-]+)',
+        r'p\.?\s*([\d.,\s-]+)',
+        r'([\d.,\s-]+)'
     ]
 
     for pattern in patterns:
         pages_match = re.search(pattern, reading_text, re.IGNORECASE)
         if pages_match:
             page_str = pages_match.group(1)
-            # Handle various page formats like "3.1, 3.2, 3.3, and 3.4" or "10-15" or "10, 12, 14"
             page_numbers = re.findall(r'[\d.]+', page_str)
-            # Convert to float for comparison
             page_numbers = [float(p) for p in page_numbers]
             break
 
-    # Set reading info based on extracted data
     if assigned_author:
         reading_info['author_last_name'] = assigned_author
     else:
@@ -615,7 +619,6 @@ def grade_submission_with_retries(
 
     if page_numbers:
         page_numbers.sort()
-        # Format page range for feedback - fix for issue 1
         if len(page_numbers) == 1:
             page_num = page_numbers[0]
             if page_num.is_integer():
@@ -623,13 +626,11 @@ def grade_submission_with_retries(
             else:
                 reading_info['page_range_expected'] = f"page {page_num}"
         elif len(page_numbers) == 2:
-            # Always use a hyphen for two pages, which are now sorted
             if page_numbers[0].is_integer() and page_numbers[1].is_integer():
                 reading_info['page_range_expected'] = f"pages {int(page_numbers[0])}-{int(page_numbers[1])}"
             else:
                 reading_info['page_range_expected'] = f"pages {page_numbers[0]}-{page_numbers[1]}"
         else:
-            # Use a comma for lists of three or more pages
             formatted_pages = []
             for p in page_numbers:
                 if p.is_integer():
@@ -640,35 +641,25 @@ def grade_submission_with_retries(
     else:
         reading_info['page_range_expected'] = "unspecified pages"
 
-    # ----------------------------------------------------
-    # D. Analyze citation presence based on updated rules
-    highest_max_reading_score = 2.0 # Default Minimum Score
+    highest_max_reading_score = 2.0
     best_citation_status_msg = f"NO CLEAR REFERENCE TO THE ASSIGNED READING WAS DETECTED. The minimum score of **2.0** applies."
     detected_author = ""
 
-    # Only proceed with citation checking if we have an author
     if reading_info['author_last_name']:
         assigned_author_lower = reading_info['author_last_name'].lower()
-
-        # Check if the author name is present in the submission
         author_present = re.search(r'\b' + re.escape(assigned_author_lower) + r'\b', submission_text.lower())
-
-        # Check if any of the page numbers are present in the submission
         page_present = False
         detected_pages = []
         if page_numbers:
-            # If the assigned reading is a range, check for numbers within it
             if len(page_numbers) == 2:
                 start_page = int(min(page_numbers))
                 end_page = int(max(page_numbers))
-                # Find all numbers in the submission that look like page citations
                 cited_pages = re.findall(r'(?:p|pg|page)s?\.?\s*(\d+)', submission_text, re.IGNORECASE)
                 for page_str in cited_pages:
                     cited_num = int(page_str)
                     if start_page <= cited_num <= end_page:
                         page_present = True
                         detected_pages.append(page_str)
-            # Otherwise, check for specific pages listed
             else:
                 for page in page_numbers:
                     page_str = str(int(page)) if isinstance(page, float) and page.is_integer() else str(page)
@@ -682,12 +673,10 @@ def grade_submission_with_retries(
                         if re.search(pattern, submission_text, re.IGNORECASE):
                             page_present = True
                             detected_pages.append(page_str)
-                            break # Found this page, move to the next assigned page
+                            break
                     if page_present and len(page_numbers) > 1:
-                        # For multiple specific pages, finding one is enough.
                         break
 
-        # Determine score based on author and page presence
         if author_present and page_present:
             highest_max_reading_score = 4.0
             best_citation_status_msg = f"Both the author ('{assigned_author}') and a relevant page number from the assigned reading were detected. Full credit awarded."
@@ -698,17 +687,12 @@ def grade_submission_with_retries(
             highest_max_reading_score = 3.5
             best_citation_status_msg = f"A page number from the assigned reading was detected, but the author ('{assigned_author}') was not mentioned. Partial credit awarded."
 
-        # Check for incorrect author if the correct one wasn't found
         if not author_present:
-            # Look for any capitalized name that might be an incorrect author
             potential_authors = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', submission_text)
             for potential_author in potential_authors:
-                # Skip common words that might be capitalized
                 if potential_author.lower() in ['the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by']:
                     continue
-
-                # Check if this could be an author citation
-                if len(potential_author) > 3:  # Only consider names longer than 3 characters
+                if len(potential_author) > 3:
                     detected_author = potential_author
                     if page_present:
                         highest_max_reading_score = 3.5
@@ -718,65 +702,56 @@ def grade_submission_with_retries(
                         best_citation_status_msg = f"A reference to '{potential_author}' was detected, but this does not match the assigned author ('{assigned_author}'). Partial credit awarded."
                     break
     else:
-        # No author found in reading text, so we can't check citations
         highest_max_reading_score = 2.0
         best_citation_status_msg = f"The assigned reading information did not specify an author. The minimum score of **2.0** applies."
 
     max_reading_score = highest_max_reading_score
     citation_status_msg = best_citation_status_msg
 
-    # --- GENERATE READING FEEDBACK BASED ON SCORE ---
     if max_reading_score == 4.0:
         reading_feedback_local = f"You successfully integrated concepts from the reading and provided a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}), earning full credit for this section"
     elif max_reading_score == 3.5:
         if detected_author:
-            # Fix for issue 2 - don't mention the specific wrong author
             reading_feedback_local = f"You referenced page number(s) from the assigned reading, but cited the wrong author. Be sure to include the correct author to earn full credit"
         else:
             reading_feedback_local = f"A page number from the assigned reading was detected, but the author was not mentioned. Include both the author and page number for full credit"
     elif max_reading_score == 3.0:
         reading_feedback_local = f"You mentioned the author ({assigned_author}), demonstrating engagement with the reading. However, you did not provide a specific page number from the assigned reading ({reading_info['page_range_expected']}) as required for higher credit. Include specific page references to earn full credit"
     elif max_reading_score == 2.5:
-        # Fix for issue 2 - don't mention the specific wrong author
         reading_feedback_local = f"You referenced the wrong author in your submission. Be sure to include the correct author and include a page number to earn more credit"
-    else:  # 2.0
+    else:
         if assigned_author:
             reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number from {assigned_author}'s text ({reading_info['page_range_expected']}) as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score"
         else:
             reading_feedback_local = f"You successfully integrated concepts from the reading, but you did not provide a specific citation with a page number as required for higher credit. You must include the author and a page number from the assigned reading to earn more than the minimum score"
 
-    # ----------------------------------------------------
-
-    # Local scores - reading score is SET here, not by LLM
     local_scores = {
         'engagement_score': engagement_score,
         'prompt_score': 0.0,
-        'reading_score': max_reading_score,  # DIRECTLY SET FROM PYTHON DETECTION
+        'reading_score': max_reading_score,
         'key_terms_score': 0.0,
-        'video_score': 0.0
+        'video_score': video_analysis['score'] # SET FROM PYTHON DETECTION
     }
     local_feedback = {
         'engagement_feedback': engagement_analysis['feedback'],
-        'reading_feedback': reading_feedback_local,  # PYTHON-GENERATED FEEDBACK
+        'reading_feedback': reading_feedback_local,
+        'video_feedback': video_analysis['feedback'], # SET FROM PYTHON DETECTION
         'key_terms_fallback': f"LLM failed to provide key terms feedback. Detected terms: {detected_terms_str}"
     }
 
-    # LLM scoring criteria - reading section is informational only
     llm_scoring_criteria = f"""
-SCORING Guidelines for LLM (10 points total - Reading is scored separately):
+SCORING Guidelines for LLM (4 points total - Reading & Video are scored separately):
 1. PROMPT ADHERENCE (Minimum 1.0 - 2.0): How well does the student address the entire prompt? (2.0 Maximum)
-2. READING REFERENCE: **This section is scored separately by the system as {max_reading_score:.1f}. Do not provide a reading_score in your response.**
-    - Citation Status (for context): {citation_status_msg}
-3. VIDEO REFERENCE (Minimum 2.0 - 4.0): How specific and relevant is the use of the assigned video material?
-    - Full credit (4.0) requires clear use of concepts demonstrated by specific examples or accurate summaries.
-    - **A specific timestamp is NOT required for a 4.0 score.**
+2. READING REFERENCE: **This section is scored separately by the system as {max_reading_score:.1f}. Do not provide a reading_score.**
+   - Citation Status (for context): {citation_status_msg}
+3. VIDEO REFERENCE: **This section is scored separately by the system as {video_analysis['score']:.1f}. Do not provide a video_score.**
 4. KEY TERMS USAGE (Minimum 1.0 - 2.0): Did the student use at least one key term (from the detected list) in a way that demonstrates contextual understanding? (2.0 Maximum)
-    - FULL CREDIT (2.0) MUST BE AWARDED if ONE or more terms are used meaningfully.
+   - FULL CREDIT (2.0) MUST BE AWARDED if ONE or more terms are used meaningfully.
 
 Detected Key Terms to review for usage: "{detected_terms_str}"
 """
 
-    prompt_for_llm = f"""Grade this student discussion submission based ONLY on the following criteria. Reading Reference ({max_reading_score:.1f}) and Engagement ({engagement_score}) are scored separately by the system.
+    prompt_for_llm = f"""Grade this student discussion submission based ONLY on the following criteria. Reading Reference ({max_reading_score:.1f}), Video Reference ({video_analysis['score']:.1f}), and Engagement ({engagement_score}) are scored separately by the system.
 
 STUDENT: {student_first_name}
 
@@ -788,30 +763,26 @@ Video: {video_text[:200]}...
 {llm_scoring_criteria}
 
 IMPORTANT: Provide SPECIFIC and ENCOURAGING feedback in the second person ("You", "Your").
-**DO NOT include "reading_score" in your JSON response - it is handled separately.**
+**DO NOT include "reading_score" or "video_score" in your JSON response - they are handled separately.**
 
 Respond with ONLY valid JSON. Omit any markdown fences (```json). Use floating point numbers rounded to the nearest 0.5.
 
 {{
-    "prompt_score": "2.0",
-    "video_score": "4.0",
-    "key_terms_score": "2.0",
-    "prompt_feedback": "You successfully articulated how involuntary servitude was preserved and connected this theme to present-day issues.",
-    "video_feedback": "You clearly referenced the video context regarding convict leasing and the continuation of forced labor, demonstrating a strong grasp of the material.",
-    "key_terms_feedback": "Your contextual usage of key terms earns full credit, demonstrating clear understanding of the material.",
-    "general_feedback": "Your arguments were well-structured and demonstrated impressive critical thinking."
+  "prompt_score": "2.0",
+  "key_terms_score": "2.0",
+  "prompt_feedback": "You successfully articulated how involuntary servitude was preserved and connected this theme to present-day issues.",
+  "key_terms_feedback": "Your contextual usage of key terms earns full credit, demonstrating clear understanding of the material.",
+  "general_feedback": "Your arguments were well-structured and demonstrated impressive critical thinking."
 }}
 
 SUBMISSION TEXT:
 {submission_text[:1500]}
 """
 
-    # 2. API Scoring (if available)
     api_results = {}
 
     if api_key and validate_api_key(api_key):
         try:
-            # Prepare the API request
             api_url = "https://openrouter.ai/api/v1/chat/completions"
             
             payload = {
@@ -822,19 +793,15 @@ SUBMISSION TEXT:
                 "max_tokens_for_reasoning": 512
             }
             
-            # Make the API call with retries
             response_text = robust_api_call(api_url, {}, payload, api_key=api_key)
             api_results = robust_json_parsing(response_text)
             
-            # Clean the API results
             api_results = recursively_clean(api_results)
             
         except ValueError as e:
-            # Handle specific ValueError exceptions (like authentication errors)
             st.error(f"API Error: {str(e)}")
             api_results = {}
         except Exception as e:
-            # Handle other exceptions without exposing the full error message
             st.error("An unexpected error occurred while calling the API. Please try again later.")
             api_results = {}
     else:
@@ -843,20 +810,13 @@ SUBMISSION TEXT:
         else:
             st.warning("Invalid API key format. Using local scoring only.")
 
-    # 3. Final Score Compilation
     try:
         local_scores['prompt_score'] = round_nearest_half(max(1.0, min(2.0, float(api_results.get("prompt_score", 1.0)))))
-        local_scores['video_score'] = round_nearest_half(max(2.0, min(4.0, float(api_results.get("video_score", 2.0)))))
         local_scores['key_terms_score'] = round_nearest_half(max(1.0, min(2.0, float(api_results.get("key_terms_score", 1.0)))))
-        # reading_score already set from Python detection
     except (ValueError, TypeError):
         local_scores['prompt_score'] = 1.0
-        local_scores['video_score'] = 2.0
         local_scores['key_terms_score'] = 1.0
-        # reading_score remains as set from Python detection
 
-    # Identify lowest scoring component for General Feedback
-    # For 15-point scale, we only consider 3 categories (excluding engagement)
     if grading_scale == "15-point (3 categories)":
         weighted_scores = {
             "Prompt Adherence": local_scores['prompt_score'] / 2.0,
@@ -864,7 +824,7 @@ SUBMISSION TEXT:
             "Reading Reference": local_scores['reading_score'] / 4.0,
             "Video Reference": local_scores['video_score'] / 4.0
         }
-    else:  # 16-point (4 categories)
+    else:
         weighted_scores = {
             "Prompt Adherence and Key Terms": (local_scores['prompt_score'] + local_scores['key_terms_score']) / 4.0,
             "Reading Reference": local_scores['reading_score'] / 4.0,
@@ -878,27 +838,22 @@ SUBMISSION TEXT:
     total = sum(local_scores.values())
     total_score = round_nearest_half(total)
 
-    # Scale scores for 15-point system
     if grading_scale == "15-point (3 categories)":
-        # Scale up the scores for 15-point scale (5 points per category)
-        # For 15-point scale, prompt and key terms are 2.5 points each
-        scaled_prompt_score = round_nearest_half(local_scores['prompt_score'] * 1.25)  # Scale from 2.0 to 2.5
-        scaled_key_terms_score = round_nearest_half(local_scores['key_terms_score'] * 1.25)  # Scale from 2.0 to 2.5
-        scaled_video_score = round_nearest_half(local_scores['video_score'] * 1.25)  # Scale from 4.0 to 5.0
-        scaled_reading_score = round_nearest_half(local_scores['reading_score'] * 1.25)  # Scale from 4.0 to 5.0
+        scaled_prompt_score = round_nearest_half(local_scores['prompt_score'] * 1.25)
+        scaled_key_terms_score = round_nearest_half(local_scores['key_terms_score'] * 1.25)
+        scaled_video_score = round_nearest_half(local_scores['video_score'] * 1.25)
+        scaled_reading_score = round_nearest_half(local_scores['reading_score'] * 1.25)
         scaled_total = round_nearest_half(scaled_prompt_score + scaled_key_terms_score + scaled_video_score + scaled_reading_score)
         
-        # FIX: Keep scores as numeric values, not strings
         final_grades = {
-            "prompt_score": scaled_prompt_score,  # Use scaled value
-            "key_terms_score": scaled_key_terms_score,  # Use scaled value
-            "video_score": scaled_video_score,  # Use scaled value
-            "reading_score": scaled_reading_score,  # Use scaled value
-            "engagement_score": 0,  # Not used in 15-point scale
-            "total_score": scaled_total,  # Use scaled total
+            "prompt_score": scaled_prompt_score,
+            "key_terms_score": scaled_key_terms_score,
+            "video_score": scaled_video_score,
+            "reading_score": scaled_reading_score,
+            "engagement_score": 0,
+            "total_score": scaled_total,
         }
     else:
-        # FIX: Keep scores as numeric values, not strings
         final_grades = {
             "prompt_score": local_scores['prompt_score'],
             "key_terms_score": local_scores['key_terms_score'],
@@ -916,7 +871,6 @@ SUBMISSION TEXT:
 # STREAMLIT APP UI
 # ============================================
 
-# Set up the Streamlit page
 st.set_page_config(
     page_title="Discussion Grading Tool",
     page_icon="📚",
@@ -924,7 +878,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling with white text in dropdown
 st.markdown("""
 <style>
     .main-header {
@@ -1058,51 +1011,40 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Header
 st.markdown('<h1 class="main-header">📚 Automated Discussion Grading Tool</h1>', unsafe_allow_html=True)
 st.markdown("Upload your CSV and DOCX files to grade student discussions.")
 
-# Sidebar for configuration
 st.sidebar.header("Configuration")
 
-# Try to get API key from Streamlit secrets first, then from environment variable, then from user input
 api_key = None
 api_key_source = "Not set"
 
-# Try Streamlit secrets
 try:
     api_key = st.secrets["OPENROUTER_API_KEY"]
     api_key_source = "Streamlit secrets"
-    # Clean the API key to remove any extra quotes or whitespace
     api_key = api_key.strip().strip('"').strip("'")
     st.sidebar.success("API key loaded from Streamlit secrets")
 except (KeyError, FileNotFoundError):
     pass
 
-# Try environment variable if not found in secrets
 if not api_key:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if api_key:
         api_key_source = "Environment variable"
-        # Clean the API key to remove any extra quotes or whitespace
         api_key = api_key.strip().strip('"').strip("'")
         st.sidebar.success("API key loaded from environment variable")
 
-# Fallback to user input
 if not api_key:
     api_key_input = st.sidebar.text_input("OpenRouter API Key", type="password", help="Enter your OpenRouter API key")
     if api_key_input:
         api_key = api_key_input.strip()
         api_key_source = "User input"
 else:
-    # If we already have an API key, show a masked input
     st.sidebar.text_input("OpenRouter API Key", type="password", value="•••••••••••••••••••••••••••••••••", disabled=True)
 
-# Display API key status
 if api_key:
     st.sidebar.info(f"API key source: {api_key_source}")
     
-    # Validate the API key format
     if api_key.startswith("sk-or-v1-") and len(api_key) > 20:
         st.sidebar.success("API key format appears valid")
     else:
@@ -1112,7 +1054,6 @@ else:
 
 st.sidebar.markdown("Get your API key from [OpenRouter](https://openrouter.ai/)")
 
-# Add grading scale selector
 grading_scale = st.sidebar.selectbox(
     "Select Grading Scale",
     ["15-point (3 categories)", "16-point (4 categories)"],
@@ -1120,14 +1061,12 @@ grading_scale = st.sidebar.selectbox(
     help="Choose between the 15-point scale (3 categories) or the 16-point scale (4 categories)"
 )
 
-# Display information about the selected grading scale
 if grading_scale == "15-point (3 categories)":
     st.sidebar.markdown("""
     <div class="scale-info">
     <h4>15-Point Scale (3 Categories)</h4>
     <ul>
-        <li>Prompt Adherence (2.5 points)</li>
-        <li>Key Terms (2.5 points)</li>
+        <li>Prompt Adherence & Key Terms (5.0 points)</li>
         <li>Reading Reference (5.0 points)</li>
         <li>Video Reference (5.0 points)</li>
     </ul>
@@ -1148,7 +1087,6 @@ else:
 
 st.sidebar.markdown("---")
 
-# Main content area
 col1, col2 = st.columns(2)
 
 with col1:
@@ -1156,7 +1094,6 @@ with col1:
     csv_file = st.file_uploader("Upload CSV file with student submissions", type=['csv'], key="csv_uploader")
     st.markdown("The CSV should contain columns for student names, initial posts, and replies.")
     
-    # Add debugging information
     if csv_file is not None:
         st.success(f"CSV file uploaded: {csv_file.name}")
     else:
@@ -1167,13 +1104,11 @@ with col2:
     docx_file = st.file_uploader("Upload DOCX lesson plan", type=['docx'], key="docx_uploader")
     st.markdown("The lesson plan should contain discussion prompts, reading assignments, and key terms.")
     
-    # Add debugging information
     if docx_file is not None:
         st.success(f"DOCX file uploaded: {docx_file.name}")
     else:
         st.info("Please upload a DOCX file to continue.")
 
-# Process files when both are uploaded
 if csv_file and docx_file:
     st.markdown("---")
     st.markdown('<div class="info-box"><h3 class="step-button">Step 3: Process Files</h3></div>', unsafe_allow_html=True)
@@ -1186,25 +1121,20 @@ if csv_file and docx_file:
         else:
             with st.spinner("Processing files... This may take a few minutes."):
                 try:
-                    # Reset file pointers to the beginning
                     csv_file.seek(0)
                     docx_file.seek(0)
                     
-                    # Read files
                     csv_content = csv_file.read()
                     docx_content = docx_file.read()
                     
-                    # Add a progress bar
                     progress_bar = st.progress(0)
                     st.text("Parsing lesson plan...")
                     
-                    # Call your existing functions
                     discussion_prompt, reading_text, video_text, key_terms, objective, key_concepts = parse_lesson_plan_comprehensive(docx_content)
                     
                     progress_bar.progress(0.25)
                     st.text("Reading CSV file...")
                     
-                    # Process CSV
                     try:
                         csv_io = io.StringIO(csv_content.decode('utf-8'))
                         rows = list(csv.DictReader(csv_io))
@@ -1215,32 +1145,25 @@ if csv_file and docx_file:
                         st.error(f"Error reading CSV file: {str(e)}")
                         st.stop()
                     
-                    # Check if we got any rows
                     if not rows:
                         st.error("No data found in CSV file. Please check the file format.")
                         st.stop()
                     
-                    # Store original columns
                     original_columns = list(rows[0].keys()) if rows else []
                     
-                    # Display extracted information
                     progress_bar.progress(0.5)
                     st.text("Analyzing submissions...")
                     
-                    # Create a dataframe to store results
                     results = []
                     
-                    # Process each student submission
                     total_students = len(rows)
                     for i, row in enumerate(rows):
                         student_name = row.get('Name', row.get('Student Name', row.get('Username', 'Unknown')))
                         initial_post = row.get('Initial Post', row.get('Initial Posts', ''))
                         replies = [row.get(f'Reply {j}', '') for j in range(1, 4) if row.get(f'Reply {j}', '')]
                         
-                        # Extract first name for personalization
                         student_first_name = student_name.split()[0] if student_name else "Student"
                         
-                        # Grade the submission
                         grade_result = grade_submission_with_retries(
                             initial_post,
                             reading_text,
@@ -1253,23 +1176,18 @@ if csv_file and docx_file:
                             grading_scale
                         )
                         
-                        # Add to results - preserving all original columns
                         result_row = row.copy()
                         result_row.update(grade_result)
                         results.append(result_row)
                         
-                        # Update progress
                         progress = (i + 1) / total_students
                         progress_bar.progress(0.5 + progress * 0.5)
                     
-                    # Create dataframe from results
                     df = pd.DataFrame(results)
                     
-                    # Display results
                     st.success("Processing complete!")
                     st.markdown('<div class="info-box"><h3>Grading Results</h3></div>', unsafe_allow_html=True)
                     
-                    # Show statistics
                     st.markdown("### 📊 Grade Statistics")
                     col1, col2, col3 = st.columns(3)
                     
@@ -1286,20 +1204,16 @@ if csv_file and docx_file:
                         max_score = df['total_score'].max()
                         st.metric("Score Range", f"{min_score:.1f} - {max_score:.1f}")
                     
-                    # Show score distribution
                     st.markdown("### 📈 Score Distribution")
                     fig = px.histogram(df, x="total_score", nbins=20, title="Distribution of Scores")
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # Show detailed results
                     st.markdown("### 📋 Detailed Results")
                     st.dataframe(df)
                     
-                    # Download button
                     csv_output = df.to_csv(index=False)
-                    # Get the original filename and add GRADED_ prefix
                     original_filename = csv_file.name
-                    base_filename = os.path.splitext(original_filename)[0]  # Remove .csv extension
+                    base_filename = os.path.splitext(original_filename)[0]
                     graded_filename = f"GRADED_{base_filename}.csv"
 
                     st.markdown('<div class="download-button">', unsafe_allow_html=True)
