@@ -1019,110 +1019,155 @@ def grade_submission_with_retries(
     # Only proceed with citation checking if we have an author
     if reading_info["author_last_name"]:
         assigned_author_lower = reading_info["author_last_name"].lower()
-        # Check if the author name is present in the submission
-        author_present = re.search(
-            r"\b" + re.escape(assigned_author_lower) + r"\b", submission_text.lower()
-        )
-        # Check if any of the page numbers are present in the submission
-        page_present = False
-        detected_pages = []
+
+        # --- NEW: Check for parenthetical citation format FIRST ---
+        paren_citation_found = False
         if page_numbers:
-            # If the assigned reading is a range, check for numbers within it
-            if len(page_numbers) == 2:
-                start_page = int(min(page_numbers))
-                end_page = int(max(page_numbers))
-                # Find all numbers in the submission that look like page citations
-                cited_pages = re.findall(
-                    r"(?:p|pg|page)s?\.?\s*(\d+)", submission_text, re.IGNORECASE
-                )
-                for page_str in cited_pages:
-                    cited_num = int(page_str)
-                    if start_page <= cited_num <= end_page:
-                        page_present = True
-                        detected_pages.append(page_str)
-            # Otherwise, check for specific pages listed
-            else:
-                for page in page_numbers:
-                    page_str = (
-                        str(int(page))
-                        if isinstance(page, float) and page.is_integer()
-                        else str(page)
+            # Looks for formats like (Davis, page 19) or (Davis, p. 19)
+            paren_citation_pattern = re.compile(
+                r"\(\s*"
+                + re.escape(assigned_author_lower)
+                + r",\s*(?:p|pg|page)s?\.?\s*(\d+)\s*\)",
+                re.IGNORECASE,
+            )
+            matches = paren_citation_pattern.finditer(submission_text)
+            for match in matches:
+                cited_num_str = match.group(1)
+                if cited_num_str:
+                    cited_num = int(cited_num_str)
+                    # Check if the cited page is valid
+                    is_valid_page = False
+                    if len(page_numbers) >= 2:  # Range check
+                        start_page, end_page = int(min(page_numbers)), int(
+                            max(page_numbers)
+                        )
+                        if start_page <= cited_num <= end_page:
+                            is_valid_page = True
+                    else:  # List check
+                        int_page_numbers = [
+                            int(p)
+                            for p in page_numbers
+                            if isinstance(p, (int, float)) and float(p).is_integer()
+                        ]
+                        if cited_num in int_page_numbers:
+                            is_valid_page = True
+
+                    if is_valid_page:
+                        highest_max_reading_score = 4.0
+                        best_citation_status_msg = (
+                            f"You included a full parenthetical citation for '{reading_info['author_last_name']}' "
+                            "with a relevant page number. Full credit awarded."
+                        )
+                        paren_citation_found = True
+                        break  # Found a perfect citation, no need for further checks
+
+        # --- If no specific parenthetical citation, use existing fallback logic ---
+        if not paren_citation_found:
+            # Check if the author name is present in the submission
+            author_present = re.search(
+                r"\b" + re.escape(assigned_author_lower) + r"\b",
+                submission_text.lower(),
+            )
+            # Check if any of the page numbers are present in the submission
+            page_present = False
+            detected_pages = []
+            if page_numbers:
+                # If the assigned reading is a range, check for numbers within it
+                if len(page_numbers) == 2:
+                    start_page = int(min(page_numbers))
+                    end_page = int(max(page_numbers))
+                    # Find all numbers in the submission that look like page citations
+                    cited_pages = re.findall(
+                        r"(?:p|pg|page)s?\.?\s*(\d+)", submission_text, re.IGNORECASE
                     )
-                    patterns = [
-                        r"\b" + re.escape(page_str) + r"\b",
-                        r"\bp\.?\s*" + re.escape(page_str) + r"\b",
-                        r"\bpage\s*" + re.escape(page_str) + r"\b",
-                        r"\bpages?\s*" + re.escape(page_str) + r"\b",
-                    ]
-                    for pattern in patterns:
-                        if re.search(pattern, submission_text, re.IGNORECASE):
+                    for page_str in cited_pages:
+                        cited_num = int(page_str)
+                        if start_page <= cited_num <= end_page:
                             page_present = True
                             detected_pages.append(page_str)
-                            break  # Found this page, move to the next assigned page
-                    if page_present and len(page_numbers) > 1:
-                        # For multiple specific pages, finding one is enough.
+                # Otherwise, check for specific pages listed
+                else:
+                    for page in page_numbers:
+                        page_str = (
+                            str(int(page))
+                            if isinstance(page, float) and page.is_integer()
+                            else str(page)
+                        )
+                        patterns = [
+                            r"\b" + re.escape(page_str) + r"\b",
+                            r"\bp\.?\s*" + re.escape(page_str) + r"\b",
+                            r"\bpage\s*" + re.escape(page_str) + r"\b",
+                            r"\bpages?\s*" + re.escape(page_str) + r"\b",
+                        ]
+                        for pattern in patterns:
+                            if re.search(pattern, submission_text, re.IGNORECASE):
+                                page_present = True
+                                detected_pages.append(page_str)
+                                break  # Found this page, move to the next assigned page
+                        if page_present and len(page_numbers) > 1:
+                            # For multiple specific pages, finding one is enough.
+                            break
+            # Determine score based on author and page presence
+            if author_present and page_present:
+                highest_max_reading_score = 4.0
+                best_citation_status_msg = (
+                    f"You included both the author ('{assigned_author}') and a relevant page "
+                    "number from the assigned reading. Full credit awarded."
+                )
+            elif author_present:
+                highest_max_reading_score = 3.0
+                best_citation_status_msg = (
+                    f"You mentioned the author ('{assigned_author}'), but you didn't include a "
+                    "specific page number from the assigned reading. Partial credit awarded."
+                )
+            elif page_present:
+                highest_max_reading_score = 3.5
+                best_citation_status_msg = (
+                    f"You cited a page number from the assigned reading, but you didn't "
+                    f"mention the author ('{assigned_author}'). Partial credit awarded."
+                )
+            # Check for incorrect author if the correct one wasn't found
+            if not author_present:
+                # Look for any capitalized name that might be an incorrect author
+                potential_authors = re.findall(
+                    r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", submission_text
+                )
+                for potential_author in potential_authors:
+                    # Skip common words that might be capitalized
+                    if potential_author.lower() in [
+                        "the",
+                        "and",
+                        "but",
+                        "or",
+                        "for",
+                        "nor",
+                        "on",
+                        "at",
+                        "to",
+                        "from",
+                        "by",
+                    ]:
+                        continue
+                    # Check if this could be an author citation
+                    if (
+                        len(potential_author) > 3
+                    ):  # Only consider names longer than 3 characters
+                        detected_author = potential_author
+                        if page_present:
+                            highest_max_reading_score = 3.5
+                            best_citation_status_msg = (
+                                f"You cited page {', '.join(detected_pages)} but attributed it to "
+                                f"'{potential_author}', which doesn't match the assigned author "
+                                f"('{assigned_author}'). Partial credit awarded for the page "
+                                "reference."
+                            )
+                        else:
+                            highest_max_reading_score = 2.5
+                            best_citation_status_msg = (
+                                f"You mentioned '{potential_author}', but that doesn't match the "
+                                f"assigned author ('{assigned_author}'). Partial credit awarded."
+                            )
                         break
-        # Determine score based on author and page presence
-        if author_present and page_present:
-            highest_max_reading_score = 4.0
-            best_citation_status_msg = (
-                f"You included both the author ('{assigned_author}') and a relevant page "
-                "number from the assigned reading. Full credit awarded."
-            )
-        elif author_present:
-            highest_max_reading_score = 3.0
-            best_citation_status_msg = (
-                f"You mentioned the author ('{assigned_author}'), but you didn't include a "
-                "specific page number from the assigned reading. Partial credit awarded."
-            )
-        elif page_present:
-            highest_max_reading_score = 3.5
-            best_citation_status_msg = (
-                f"You cited a page number from the assigned reading, but you didn't "
-                f"mention the author ('{assigned_author}'). Partial credit awarded."
-            )
-        # Check for incorrect author if the correct one wasn't found
-        if not author_present:
-            # Look for any capitalized name that might be an incorrect author
-            potential_authors = re.findall(
-                r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", submission_text
-            )
-            for potential_author in potential_authors:
-                # Skip common words that might be capitalized
-                if potential_author.lower() in [
-                    "the",
-                    "and",
-                    "but",
-                    "or",
-                    "for",
-                    "nor",
-                    "on",
-                    "at",
-                    "to",
-                    "from",
-                    "by",
-                ]:
-                    continue
-                # Check if this could be an author citation
-                if (
-                    len(potential_author) > 3
-                ):  # Only consider names longer than 3 characters
-                    detected_author = potential_author
-                    if page_present:
-                        highest_max_reading_score = 3.5
-                        best_citation_status_msg = (
-                            f"You cited page {', '.join(detected_pages)} but attributed it to "
-                            f"'{potential_author}', which doesn't match the assigned author "
-                            f"('{assigned_author}'). Partial credit awarded for the page "
-                            "reference."
-                        )
-                    else:
-                        highest_max_reading_score = 2.5
-                        best_citation_status_msg = (
-                            f"You mentioned '{potential_author}', but that doesn't match the "
-                            f"assigned author ('{assigned_author}'). Partial credit awarded."
-                        )
-                    break
     else:
         # No author found in reading text, so we can't check citations
         highest_max_reading_score = 2.0
