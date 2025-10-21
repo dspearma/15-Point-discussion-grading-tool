@@ -921,7 +921,6 @@ I have updated the `grade_submission_with_retries` function below with this simp
 
 ### Updated Grading Function
 
-Here is the revised function. I've removed the specialized check for parenthetical citations, leaving only the more flexible logic you requested.
 
 def grade_submission_with_retries(
     submission_text: str,
