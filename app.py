@@ -946,16 +946,16 @@ def grade_submission_with_retries(
             if "READING:" in line:
                 reading_line = line.strip()
                 break
-        # Extract author (first word after "READING:")
+        # --- FIX #1: Updated Regex to handle ALL CAPS ---
         author_match = re.search(
-            r"READING:\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)", reading_line
+            r"READING:\s*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)", reading_line
         )
         assigned_author = author_match.group(1).strip() if author_match else ""
     else:
         # Fallback if "READING:" is not explicitly in the text
-        # Extract author (first word before the first comma)
+        # --- FIX #2: Updated Fallback Regex to handle ALL CAPS ---
         author_match = re.search(
-            r"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)", reading_text.strip()
+            r"^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)", reading_text.strip()
         )
         assigned_author = author_match.group(1).strip() if author_match else ""
     # Look for page numbers in various formats
@@ -1262,7 +1262,7 @@ SUBMISSION TEXT:
     if api_key and validate_api_key(api_key):
         try:
             # Prepare the API request
-            api_url = "https://openrouter.ai/api/v1/chat/completions"
+            api_url = "[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)"
             payload = {
                 "model": "google/gemini-2.5-flash-preview-09-2025",
                 "messages": [{"role": "user", "content": prompt_for_llm}],
