@@ -910,15 +910,6 @@ def similarity_ratio(str1, str2):
         return 0
     return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
 
-
-Yes, absolutely. We can simplify the logic to do exactly that.
-
-This change removes the strict requirement for a parenthetical `(Author, page #)` format and instead uses a broader check. The grader will now award full credit if the author's last name and a valid page number appear **anywhere** in the submission, such as in your example, `"Angela Davis says on page 10"`.
-
-I have updated the `grade_submission_with_retries` function below with this simplified logic. The rest of the script remains the same.
-
------
-
 ### Updated Grading Function
 
 
