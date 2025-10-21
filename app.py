@@ -1262,7 +1262,7 @@ SUBMISSION TEXT:
     if api_key and validate_api_key(api_key):
         try:
             # Prepare the API request
-            api_url = "[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)"
+            api_url = "https://openrouter.ai/api/v1/chat/completions"
             payload = {
                 "model": "google/gemini-2.5-flash-preview-09-2025",
                 "messages": [{"role": "user", "content": prompt_for_llm}],
